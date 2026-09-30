@@ -33,6 +33,16 @@
      <AppBarButton.KeyboardAccelerators><KeyboardAccelerator Modifiers="Control" Key="W" /></AppBarButton.KeyboardAccelerators>
     </AppBarButton>
     <AppBarSeparator />
+    <AppBarButton Icon="Undo" Label="Undo" Command="{x:Bind ViewModel.UndoCommand}" ToolTipService.ToolTip="Undo the last Format or Reflow (Ctrl+Z)">
+     <AppBarButton.KeyboardAccelerators><KeyboardAccelerator Modifiers="Control" Key="Z" /></AppBarButton.KeyboardAccelerators>
+    </AppBarButton>
+    <AppBarButton Icon="Redo" Label="Redo" Command="{x:Bind ViewModel.RedoCommand}" ToolTipService.ToolTip="Redo (Ctrl+Y)">
+     <AppBarButton.KeyboardAccelerators>
+      <KeyboardAccelerator Modifiers="Control" Key="Y" />
+      <KeyboardAccelerator Modifiers="Control,Shift" Key="Z" />
+     </AppBarButton.KeyboardAccelerators>
+    </AppBarButton>
+    <AppBarSeparator />
     <AppBarButton Icon="Share" Label="Export" Command="{x:Bind ViewModel.ExportCommand}" ToolTipService.ToolTip="Export through Pandoc: Word, HTML, EPUB, RTF, ODT, LaTeX, Typst, reStructuredText, Org">
      <AppBarButton.KeyboardAccelerators><KeyboardAccelerator Modifiers="Control" Key="E" /></AppBarButton.KeyboardAccelerators>
     </AppBarButton>

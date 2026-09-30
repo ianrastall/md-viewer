@@ -14,6 +14,8 @@ public partial class MainViewModel : ObservableObject
     public const int MinZoom = 50, MaxZoom = 250, ZoomStep = 10, MaxCrawlPages = 250;
     private readonly IViewerDialogs dialogs;
     private readonly ViewerSettings settings;
+    private const int UndoLimit = 100;
+    private readonly List<string> undoHistory = [], redoHistory = [];
     private CancellationTokenSource? operation;
     private string? savedText;
     private int renderGeneration;
@@ -70,6 +72,8 @@ public partial class MainViewModel : ObservableObject
         set { settings.OutlineWidth = value; settings.Save(); }
     }
     public bool IsIdle => !IsBusy;
+    public bool CanUndo => undoHistory.Count > 0;
+    public bool CanRedo => redoHistory.Count > 0;
     /// <summary>Relative links and images resolve against the document's folder.</summary>
     public string? BaseDirectory => Path.GetDirectoryName(FilePath ?? SourcePath) is { Length: > 0 } directory ? directory : null;
 
@@ -250,6 +254,46 @@ public partial class MainViewModel : ObservableObject
         finally { IsCrawling = false; operation = null; }
     }
 
+    /// <summary>Steps back through changes made by Format and Reflow. Saving does not clear the history.</summary>
+    [RelayCommand(CanExecute = nameof(CanUndo))]
+    private async Task UndoAsync()
+    {
+        if (IsBusy || undoHistory.Count == 0) return;
+        redoHistory.Add(MarkdownText);
+        await RestoreAsync(Pop(undoHistory), "Undid the last change.");
+    }
+
+    [RelayCommand(CanExecute = nameof(CanRedo))]
+    private async Task RedoAsync()
+    {
+        if (IsBusy || redoHistory.Count == 0) return;
+        undoHistory.Add(MarkdownText);
+        await RestoreAsync(Pop(redoHistory), "Redid the change.");
+    }
+
+    private static string Pop(List<string> history)
+    {
+        var text = history[^1];
+        history.RemoveAt(history.Count - 1);
+        return text;
+    }
+
+    private async Task RestoreAsync(string text, string status)
+    {
+        MarkdownText = text;
+        NotifyHistory();
+        await RenderAsync();
+        Status = status;
+    }
+
+    private void NotifyHistory()
+    {
+        OnPropertyChanged(nameof(CanUndo));
+        OnPropertyChanged(nameof(CanRedo));
+        UndoCommand.NotifyCanExecuteChanged();
+        RedoCommand.NotifyCanExecuteChanged();
+    }
+
     [RelayCommand]
     private void CancelOperation()
     {
@@ -292,7 +336,11 @@ public partial class MainViewModel : ObservableObject
     {
         if (text == MarkdownText) { Status = unchanged; return; }
         if (Origin == DocumentOrigin.Welcome) Origin = DocumentOrigin.Imported;
+        undoHistory.Add(MarkdownText);
+        if (undoHistory.Count > UndoLimit) undoHistory.RemoveAt(0);
+        redoHistory.Clear();
         MarkdownText = text;
+        NotifyHistory();
         await RenderAsync();
         Status = changed;
     }
@@ -301,6 +349,9 @@ public partial class MainViewModel : ObservableObject
     {
         savedText = saved;
         EncodingLabel = encoding;
+        undoHistory.Clear();
+        redoHistory.Clear();
+        NotifyHistory();
         Origin = origin;
         FilePath = filePath;
         SourcePath = sourcePath;

@@ -18,6 +18,7 @@ try
 {
     var settingsPath = Path.Combine(scratch.FullName, "settings.json");
     Core.Configure(Path.Combine(scratch.FullName, "data"));
+    AppLog.Directory = Path.Combine(scratch.FullName, "logs");
     var dialogs = new FakeDialogs();
     var vm = new MainViewModel(dialogs, ViewerSettings.Load(settingsPath));
 
@@ -42,6 +43,14 @@ try
     await vm.ReflowCommand.ExecuteAsync(null);
     Check("reflow idempotent", vm.Status.StartsWith("Reflow made no heading-level changes", StringComparison.Ordinal), vm.Status);
 
+    // Undo and redo step through Format/Reflow changes; dirty state follows the saved text.
+    var reflowed = vm.MarkdownText;
+    Check("undo available", vm.CanUndo && !vm.CanRedo && vm.UndoCommand.CanExecute(null));
+    await vm.UndoCommand.ExecuteAsync(null);
+    Check("undo", vm.MarkdownText == "# Notes\n\n### Skipped\n\ntext\n\n## Child\n" && !vm.IsDirty && !vm.CanUndo && vm.CanRedo && vm.Headings[0].Children[0].Title == "Skipped");
+    await vm.RedoCommand.ExecuteAsync(null);
+    Check("redo", vm.MarkdownText == reflowed && vm.IsDirty && vm.CanUndo && !vm.CanRedo);
+
     // Closing asks first; Cancel keeps everything.
     dialogs.Unsaved = UnsavedChoice.Cancel;
     await vm.CloseDocumentCommand.ExecuteAsync(null);
@@ -50,6 +59,10 @@ try
     // Save writes in place.
     await vm.SaveCommand.ExecuteAsync(null);
     Check("save", !vm.IsDirty && File.ReadAllText(file) == vm.MarkdownText && dialogs.SavePrompts == 0);
+    await vm.UndoCommand.ExecuteAsync(null);
+    Check("undo after save marks the document dirty again", vm.IsDirty && vm.CanRedo);
+    await vm.RedoCommand.ExecuteAsync(null);
+    Check("redo back to the saved text", !vm.IsDirty);
 
     // Opening another file while dirty: Discard proceeds without saving.
     vm.ZoomInCommand.Execute(null);
@@ -58,6 +71,7 @@ try
     await vm.ReflowCommand.ExecuteAsync(null); // no headings: no change, stays clean
     Check("no-heading reflow on clean doc", !vm.IsDirty);
     await vm.OpenFileAsync(other);
+    Check("opening clears history", !vm.CanUndo && !vm.CanRedo);
     Check("open other", vm.DocumentTitle == "other.markdown" && vm.HasNoOutline && dialogs.UnsavedPrompts == 1);
 
     // Unsupported files report an error and keep the current document.

@@ -475,6 +475,12 @@ int main() {
         const auto markdown = "---\ntitle: T\n---\nSetext\n======\n\n| a | b |\n|---|---|\n| 1 | 2 |\n"s;
         const auto formatted = take(mdv_pandoc_format(markdown.data(), markdown.size(), nullptr, nullptr));
         check("pandoc format", formatted.ok() && formatted.data.starts_with("---\ntitle: T\n---\n\n# Setext") && formatted.data.find("| a") != std::string::npos, formatted.data);
+        auto format = [](const std::string& text) { return take(mdv_pandoc_format(text.data(), text.size(), nullptr, nullptr)).data; };
+        check("format keeps LF", format("# T\n\nOne\ntwo.\n\nThree.\n") == "# T\n\nOne two.\n\nThree.\n", format("# T\n\nOne\ntwo.\n\nThree.\n"));
+        check("format keeps CRLF", format("# T\r\n\r\nOne.\r\n\r\nTwo.\r\n") == "# T\r\n\r\nOne.\r\n\r\nTwo.\r\n");
+        check("format keeps paragraphs with CR-only endings", format("# T\r\rOne.\r\rTwo.\r") == "# T\n\nOne.\n\nTwo.\n", format("# T\r\rOne.\r\rTwo.\r"));
+        check("format keeps paragraphs with CR CR LF endings", format("# T\r\r\nOne.\r\r\nTwo.\r\r\n") == "# T\r\n\r\nOne.\r\n\r\nTwo.\r\n", format("# T\r\r\nOne.\r\r\nTwo.\r\r\n"));
+        check("format keeps CRLF front matter", format("---\r\ntitle: T\r\n---\r\nBody\r\n") == "---\r\ntitle: T\r\n---\r\n\r\nBody\r\n", format("---\r\ntitle: T\r\n---\r\nBody\r\n"));
         const auto html = scratch / "page.html";
         write_all(html, "<html><body><h1 id=\"x\" class=\"c\">Hello</h1><div class=\"note\"><p>World <span class=\"k\">here</span></p></div></body></html>");
         const auto imported = take(mdv_open(html.string().c_str(), nullptr, nullptr));

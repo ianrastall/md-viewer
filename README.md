@@ -35,8 +35,9 @@ For development, the loose build is at `artifacts/app/MdViewer.exe` (the .NET 10
 - **Import:** Open also converts `.docx`, `.html`, `.htm`, `.epub`, `.odt`, and `.rtf` through Pandoc, and `.pdf` with built-in text extraction plus Windows OCR for scanned pages. Imported Markdown includes a hidden diagnostics comment with page, OCR, and warning details.
 - **Export** (Ctrl+E): Word, HTML, EPUB, RTF, ODT, LaTeX, Typst, reStructuredText, or Org through Pandoc. Relative images resolve from the document's folder.
 - **Crawl:** collects a documentation site into one Markdown document. It stays within the start page's folder, fetches one page at a time at least two seconds apart, honors `robots.txt` and `Crawl-delay`, stops at 250 pages, and fetches Wikipedia and other MediaWiki articles as a single article.
-- **Format:** normalizes the Markdown through Pandoc: ATX headings, pipe tables, no hard wrapping, and no Pandoc-only attribute, div, or span syntax. A leading YAML metadata block is kept verbatim.
+- **Format:** normalizes the Markdown through Pandoc: ATX headings, pipe tables, no hard wrapping, and no Pandoc-only attribute, div, or span syntax. A leading YAML metadata block is kept verbatim. Files with old Mac (CR-only) or doubled (CR CR LF) line endings keep their paragraphs; the result uses the document's own line endings (CRLF or LF).
 - **Reflow:** repairs skipped heading levels (`#`, `###`, `#####` becomes `#`, `##`, `###`), editing only the heading markers. The status bar reports changes and anything worth reviewing, such as hand-written tables of contents or anchor links.
+- **Undo** (Ctrl+Z) and **Redo** (Ctrl+Y or Ctrl+Shift+Z) step through Format and Reflow changes, up to 100 steps; opening or closing a document clears the history.
 - **Save** (Ctrl+S) and **Save as** (Ctrl+Shift+S) write Markdown. Saves go through a temporary file, so a failed save never truncates the original. Closing, opening, or crawling over unsaved work (including a fresh import) asks first.
 
 Pandoc is optional for reading. Import (other than PDF), export, crawl, and format need it. md-viewer looks for `pandoc.exe` in its own data folder, beside the app, on `PATH`, and in Pandoc's standard install folders. **Fetch Pandoc** (in the ⋯ menu) downloads the latest official Windows x64 release from GitHub, checks GitHub's published SHA-256 digest when one is available, and installs it in md-viewer's data folder without changing `PATH`.
@@ -46,6 +47,7 @@ Pandoc is optional for reading. Import (other than PDF), export, crawl, and form
 | Ctrl+O | Open or import |
 | Ctrl+S / Ctrl+Shift+S | Save / Save as |
 | Ctrl+W | Close the document |
+| Ctrl+Z / Ctrl+Y | Undo / redo Format and Reflow |
 | Ctrl+E | Export |
 | Ctrl+R | Toggle raw Markdown |
 | Ctrl+Plus / Ctrl+Minus / Ctrl+0 | Zoom in / out / reset |
@@ -62,7 +64,7 @@ Windows 10 build 19041 or later, the .NET 10 SDK, Visual Studio 2026 (or 2022) w
 
 Open `MdViewer.slnx` in Visual Studio to work on the managed projects. Build the native core with the script first; the application and tests copy `build/native/Release/mdv_native.dll` and `pdfium.dll` into their output folders. The native project also builds directly with CMake (`native/CMakeLists.txt`).
 
-`build/native/Release/mdv_tests.exe` (built with the core, run by `-Test`) exercises the C++ core through its C ABI and internal modules: block and inline structure, outline lines and slugs, statistics, entities, and front matter; heading reflow in lists, quotes, and setext form; a 20,000-heading document; file encodings, Unicode paths, and atomic saves; PDF import, including Windows OCR on a text-less scanned page; robots.txt, URL resolution, HTML selection, and Markdown cleanup for the crawler; cancellation; and Pandoc import, format, and export when Pandoc is installed. Set `MDV_NETWORK_TESTS=1` to add one live crawl of a Wikipedia article. `tests/MdViewer.Tests` drives the real view-model commands through the C ABI with simulated dialogs and isolated settings: open, reflow, save, save as, unsaved-change prompts, encodings, zoom persistence, and Pandoc import and export. Both exit nonzero on failure.
+`build/native/Release/mdv_tests.exe` (built with the core, run by `-Test`) exercises the C++ core through its C ABI and internal modules: block and inline structure, outline lines and slugs, statistics, entities, and front matter; heading reflow in lists, quotes, and setext form; a 20,000-heading document; file encodings, Unicode paths, and atomic saves; PDF import, including Windows OCR on a text-less scanned page; robots.txt, URL resolution, HTML selection, and Markdown cleanup for the crawler; cancellation; and Pandoc import, format, and export when Pandoc is installed. Set `MDV_NETWORK_TESTS=1` to add one live crawl of a Wikipedia article. `tests/MdViewer.Tests` drives the real view-model commands through the C ABI with simulated dialogs and isolated settings: open, reflow, save, save as, undo and redo, unsaved-change prompts, encodings, zoom persistence, and Pandoc import and export. Both exit nonzero on failure.
 
 Rebuild the icon sizes from `src/MdViewer/Assets/MdViewerIconMaster.png` with `.\scripts\build-icons.ps1` (requires ImageMagick); see `src/MdViewer/Assets/ICON.md`.
 

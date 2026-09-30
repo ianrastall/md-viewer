@@ -57,7 +57,15 @@ std::string filter_path() {
 }
 
 std::vector<std::string> writer_options() {
-    return {"--wrap=none", "--markdown-headings=atx", "--lua-filter=" + filter_path()};
+    return {"--wrap=none", "--markdown-headings=atx", "--eol=lf", "--lua-filter=" + filter_path()};
+}
+
+// True when most line breaks are CRLF, so Format can hand the document back in its own style.
+bool prefers_crlf(std::string_view text) {
+    size_t crlf = 0, lf = 0;
+    for (size_t i = 0; i < text.size(); ++i)
+        if (text[i] == '\n') (i > 0 && text[i - 1] == '\r' ? crlf : lf)++;
+    return crlf > 0 && crlf >= lf;
 }
 
 std::string run(std::vector<std::string> arguments, const std::optional<std::string>& input, const std::string& working_directory,
@@ -113,13 +121,17 @@ std::string pandoc_import(const std::string& path, const Progress& progress) {
 }
 
 std::string pandoc_format(std::string_view markdown, const Progress& progress) {
-    auto [metadata, body] = split_metadata_block(markdown);
+    // md-viewer (like most editors) treats CR-only and doubled CR CR LF endings as line breaks, but
+    // Pandoc reads a lone CR as a space and would merge every paragraph into one. Give Pandoc plain
+    // LF text, then return the result in the document's own line-ending style.
+    const bool crlf = prefers_crlf(markdown);
+    auto [metadata, body] = split_metadata_block(normalize_newlines(markdown));
     std::vector<std::string> arguments = {"-f", "markdown-yaml_metadata_block", "-t", MarkdownWriter};
     for (auto& option : writer_options()) arguments.push_back(std::move(option));
     // The metadata block is kept verbatim; Pandoc would otherwise rewrite or drop it.
     auto formatted = run(arguments, body, "", std::nullopt, progress);
-    if (!metadata) return formatted;
-    return trim(formatted).empty() ? *metadata + "\n" : *metadata + "\n\n" + std::string(trim_start(formatted));
+    if (metadata) formatted = trim(formatted).empty() ? *metadata + "\n" : *metadata + "\n\n" + std::string(trim_start(formatted));
+    return crlf ? replace_all(std::move(formatted), "\n", "\r\n") : formatted;
 }
 
 void pandoc_export(std::string_view markdown, const std::string& target, const std::string& resource_directory, const Progress& progress) {
@@ -131,7 +143,7 @@ void pandoc_export(std::string_view markdown, const std::string& target, const s
     if (!directory_exists(directory_of(target))) throw Error("The folder for " + target + " does not exist.");
     std::vector<std::string> arguments = {"-s", "-f", "markdown", "-t", format->writer, "-o", target};
     if (!resource_directory.empty()) arguments.push_back("--resource-path=" + resource_directory);
-    run(arguments, std::string(markdown), resource_directory, std::nullopt, progress);
+    run(arguments, normalize_newlines(markdown), resource_directory, std::nullopt, progress);
 }
 
 std::string pandoc_convert(const std::string& from, std::string_view input, const Progress& progress) {
