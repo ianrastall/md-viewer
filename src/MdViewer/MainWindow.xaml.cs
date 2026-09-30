@@ -1,7 +1,5 @@
 using System.ComponentModel;
-using MdViewer.Core;
-using MdViewer.Core.Documents;
-using MdViewer.Core.Pandoc;
+using MdViewer.Interop;
 using MdViewer.Services;
 using MdViewer.ViewModels;
 using Microsoft.UI;
@@ -158,7 +156,7 @@ public sealed partial class MainWindow : Window, IViewerDialogs
                 return;
             }
             var (path, anchor) = ResolveLocalLink(url);
-            if (path is not null && File.Exists(path) && DocumentFile.IsMarkdown(path))
+            if (path is not null && File.Exists(path) && Core.KindOf(path) == FileKind.Markdown)
             {
                 if (!path.Equals(ViewModel.FilePath, StringComparison.OrdinalIgnoreCase)) await ViewModel.OpenFileAsync(path);
                 if (anchor is not null && path.Equals(ViewModel.FilePath, StringComparison.OrdinalIgnoreCase)) ScrollToAnchor(anchor);
@@ -248,7 +246,7 @@ public sealed partial class MainWindow : Window, IViewerDialogs
     public async Task<string?> PickOpenPathAsync()
     {
         var picker = Picker(new FileOpenPicker { SuggestedStartLocation = PickerLocationId.DocumentsLibrary, ViewMode = PickerViewMode.List });
-        foreach (var extension in DocumentFile.MarkdownExtensions.Concat(DocumentFile.PandocImportExtensions).Append(".pdf")) picker.FileTypeFilter.Add(extension);
+        foreach (var type in Core.FileTypes.Where(t => t.Kind != FileKind.Export)) picker.FileTypeFilter.Add(type.Extension);
         var file = await picker.PickSingleFileAsync();
         if (file is null) return null;
         if (string.IsNullOrEmpty(file.Path)) throw new IOException("The selected file has no local path. Copy it to a local folder and try again.");
@@ -266,7 +264,7 @@ public sealed partial class MainWindow : Window, IViewerDialogs
     public async Task<string?> PickExportPathAsync(string suggestedName)
     {
         var picker = Picker(new FileSavePicker { SuggestedStartLocation = PickerLocationId.DocumentsLibrary, SuggestedFileName = suggestedName, DefaultFileExtension = ".docx" });
-        foreach (var (label, extension, _) in PandocService.ExportFormats) picker.FileTypeChoices.Add(label, new List<string> { extension });
+        foreach (var type in Core.FileTypes.Where(t => t.Kind == FileKind.Export)) picker.FileTypeChoices.Add(type.Label, new List<string> { type.Extension });
         return (await picker.PickSaveFileAsync())?.Path;
     }
 

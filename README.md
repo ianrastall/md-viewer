@@ -2,7 +2,7 @@
 
 A native dark-mode Markdown reader and converter for Windows. It renders Markdown with WinUI controls, builds a heading outline for navigation, imports Word, HTML, EPUB, and PDF documents, exports through Pandoc, and can collect a documentation site into one Markdown file. A green accent palette runs through the interface; theme colors are centralized in `src/MdViewer/App.xaml`.
 
-Built with **WinUI 3, C# 14, .NET 10, CommunityToolkit.Mvvm, and C++20**. The Markdown engine is C++ ([md4c](https://github.com/mity/md4c)) behind a small versioned C ABI; C# provides the window, view models, and services. No browser or WebView is used.
+Built with **WinUI 3, C# 14, .NET 10, CommunityToolkit.Mvvm, and C++20**. The program itself is C++ behind a versioned C ABI (`native/include/mdv_native.h`): Markdown parsing and reflow, reading and saving documents, Pandoc import/export/format, PDF import with Windows OCR, the documentation crawler, and Fetch Pandoc. C# draws the window and handles the outside world: rendering, the view model, dialogs, settings, and packaging. No browser or WebView is used.
 
 > md-viewer replaces **MDViewer**, the earlier unpackaged version of this app. Its last source is tagged [`v1-legacy`](https://github.com/ianrastall/md-viewer/tree/v1-legacy).
 
@@ -54,15 +54,15 @@ md-viewer's data folder holds `settings.json`, a fetched Pandoc, and the `app.lo
 
 ## Build and verify
 
-Windows 10 build 19041 or later, the .NET 10 SDK, Visual Studio 2026 (or 2022) with the Desktop development with C++ tools, Windows SDK 10.0.26100, and CMake on PATH are required. Visual Studio 2026 needs CMake 4.2 or later. NuGet access is needed on the first build; md4c is vendored and pinned.
+Windows 10 build 19041 or later, the .NET 10 SDK, Visual Studio 2026 (or 2022) with the Desktop development with C++ tools, Windows SDK 10.0.26100 (including its C++/WinRT headers), and CMake on PATH are required. Visual Studio 2026 needs CMake 4.2 or later. The first build needs network access for NuGet and for PDFium, which `scripts\build.ps1` downloads from a pinned [pdfium-binaries](https://github.com/bblanchon/pdfium-binaries) release and checks against its SHA-256. The other C/C++ libraries are vendored and pinned in `native/vendor`.
 
 ```powershell
 .\scripts\build.ps1 -Test
 ```
 
-Open `MdViewer.slnx` in Visual Studio to work on the managed projects. Build the native DLL with the script first; the application and tests copy `build/native/Release/mdv_native.dll` into their output folders. The native project also builds directly with CMake.
+Open `MdViewer.slnx` in Visual Studio to work on the managed projects. Build the native core with the script first; the application and tests copy `build/native/Release/mdv_native.dll` and `pdfium.dll` into their output folders. The native project also builds directly with CMake (`native/CMakeLists.txt`).
 
-`tests/MdViewer.Core.Tests` exercises the C++ core through its ABI (block and inline structure, outline lines and slugs, statistics, entities, front matter, heading reflow in lists, quotes, and setext form, and a 20,000-heading document), file encodings and atomic saves, PDF import, the crawler's robots.txt and cleanup rules, and Pandoc import, format, and export when Pandoc is installed. Set `MDV_NETWORK_TESTS=1` to add one live crawl of a Wikipedia article. `tests/MdViewer.Tests` drives the real view-model commands with simulated dialogs and isolated settings: open, reflow, save, save as, unsaved-change prompts, encodings, zoom persistence, and Pandoc import and export. Both exit nonzero on failure.
+`build/native/Release/mdv_tests.exe` (built with the core, run by `-Test`) exercises the C++ core through its C ABI and internal modules: block and inline structure, outline lines and slugs, statistics, entities, and front matter; heading reflow in lists, quotes, and setext form; a 20,000-heading document; file encodings, Unicode paths, and atomic saves; PDF import, including Windows OCR on a text-less scanned page; robots.txt, URL resolution, HTML selection, and Markdown cleanup for the crawler; cancellation; and Pandoc import, format, and export when Pandoc is installed. Set `MDV_NETWORK_TESTS=1` to add one live crawl of a Wikipedia article. `tests/MdViewer.Tests` drives the real view-model commands through the C ABI with simulated dialogs and isolated settings: open, reflow, save, save as, unsaved-change prompts, encodings, zoom persistence, and Pandoc import and export. Both exit nonzero on failure.
 
 Rebuild the icon sizes from `src/MdViewer/Assets/MdViewerIconMaster.png` with `.\scripts\build-icons.ps1` (requires ImageMagick); see `src/MdViewer/Assets/ICON.md`.
 
@@ -70,15 +70,16 @@ Rebuild the icon sizes from `src/MdViewer/Assets/MdViewerIconMaster.png` with `.
 
 | Path | Responsibility |
 | --- | --- |
-| `native` | C++ Markdown core: parsing to a compact document model, outline, statistics, and heading reflow, behind a versioned UTF-8 C ABI (`native/include/mdv_native.h`) |
-| `native/vendor/md4c` | md4c parser, vendored unchanged |
-| `src/MdViewer.Core` | Native interop and document model, encodings and atomic saves, Pandoc, PDF import, crawler, settings |
-| `src/MdViewer` | WinUI window, view model and commands, native Markdown rendering, dialogs |
+| `native/include/mdv_native.h` | The C ABI between the C# frame and the C++ program |
+| `native/src` | The program: Markdown engine (`markdown`), documents and encodings (`files`), Pandoc (`pandoc`, `subprocess`), PDF import and OCR (`pdf`), crawler (`crawl`, `html`, `http`, `url`), Fetch Pandoc (`download`), and the exported ABI (`abi`) |
+| `native/vendor` | md4c, Gumbo, nlohmann/json, and miniz, vendored unchanged |
+| `native/tests` | Native integration checks |
+| `src/MdViewer.Interop` | C# declarations and marshaling for the C ABI, and the document model the renderer draws |
+| `src/MdViewer` | WinUI window, view model and commands, native Markdown rendering, dialogs, settings |
 | `packaging` | MSIX manifest (Start Menu entry and Open with) |
-| `tests/MdViewer.Core.Tests` | Core and native integration checks |
 | `tests/MdViewer.Tests` | View-model workflows with simulated dialogs |
 
-The C++ core receives UTF-8 Markdown and returns either a binary document model or rewritten text; C# releases every native buffer. The renderer builds native WinUI text, lists, tables, code blocks, and images for each top-level block as it scrolls into view, so documents of tens of thousands of blocks stay responsive.
+C# passes UTF-8 text and paths across the ABI; the core returns a result buffer (a binary document model for rendering, or text) that C# releases with `mdv_result_free`. Long operations report progress and poll for cancellation through a callback, and run on a worker thread so the window stays responsive. The renderer builds native WinUI text, lists, tables, code blocks, and images for each top-level block as it scrolls into view, so documents of tens of thousands of blocks stay responsive.
 
 ## Notes
 

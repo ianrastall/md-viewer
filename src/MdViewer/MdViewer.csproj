@@ -21,9 +21,15 @@
     <Content Update="Assets\AppIcon.ico" CopyToOutputDirectory="PreserveNewest" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.4.0" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
-    <ProjectReference Include="../MdViewer.Core/MdViewer.Core.csproj" />
+    <ProjectReference Include="../MdViewer.Interop/MdViewer.Interop.csproj" />
     <Content Include="../../native/vendor/md4c/LICENSE.md" Link="licenses/md4c.txt" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../build/native/Release/mdv_native.dll" Link="mdv_native.dll" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../build/native/Release/pdfium.dll" Link="pdfium.dll" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../native/vendor/gumbo/COPYING" Link="licenses/gumbo.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../native/vendor/miniz/LICENSE" Link="licenses/miniz.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../native/vendor/nlohmann/LICENSE.MIT" Link="licenses/nlohmann-json.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../build/pdfium/LICENSE" Link="licenses/pdfium.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../build/pdfium/licenses/*" Link="licenses/pdfium/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <!-- The unpackaged WinUI build emits these after normal content discovery.
        Explicitly include them when publishing the self-contained package layout. -->

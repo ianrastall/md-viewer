@@ -6,11 +6,12 @@
     <PlatformTarget>x64</PlatformTarget>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../../src/MdViewer.Core/MdViewer.Core.csproj" />
+    <ProjectReference Include="../../src/MdViewer.Interop/MdViewer.Interop.csproj" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <!-- Compile the same view model without loading WinUI or opening a window. -->
     <Compile Include="../../src/MdViewer/ViewModels/*.cs" Link="ViewModels/%(Filename)%(Extension)" />
-    <Compile Include="../../src/MdViewer/Services/IViewerDialogs.cs" Link="Services/IViewerDialogs.cs" />
+    <Compile Include="../../src/MdViewer/Services/*.cs" Link="Services/%(Filename)%(Extension)" />
     <Content Include="../../build/native/Release/mdv_native.dll" Link="mdv_native.dll" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../build/native/Release/pdfium.dll" Link="pdfium.dll" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

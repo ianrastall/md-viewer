@@ -21,7 +21,7 @@ if (Test-Path -LiteralPath $layout) {
 }
 & dotnet publish (Join-Path $root 'src\MdViewer\MdViewer.csproj') -c Release -r win-x64 --self-contained true --nologo -o $layout
 if ($LASTEXITCODE -ne 0) { throw 'Self-contained publish failed.' }
-foreach ($required in @('MdViewer.exe', 'MdViewer.pri', 'App.xbf', 'MainWindow.xbf', 'coreclr.dll', 'Microsoft.UI.Xaml.dll', 'mdv_native.dll', 'Assets\AppIcon.ico', 'Assets\Square44x44Logo.png', 'licenses\md4c.txt')) {
+foreach ($required in @('MdViewer.exe', 'MdViewer.pri', 'App.xbf', 'MainWindow.xbf', 'coreclr.dll', 'Microsoft.UI.Xaml.dll', 'mdv_native.dll', 'pdfium.dll', 'Assets\AppIcon.ico', 'Assets\Square44x44Logo.png', 'licenses\md4c.txt', 'licenses\gumbo.txt', 'licenses\pdfium.txt')) {
     if (-not (Test-Path -LiteralPath (Join-Path $layout $required))) { throw "Package is missing $required" }
 }
 Copy-Item -LiteralPath (Join-Path $root 'packaging\AppxManifest.xml') -Destination $layout

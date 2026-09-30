@@ -1,4 +1,4 @@
-using MdViewer.Core.Markdown;
+using MdViewer.Interop.Markdown;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;

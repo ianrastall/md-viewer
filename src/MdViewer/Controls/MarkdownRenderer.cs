@@ -1,5 +1,5 @@
 using System.Text.RegularExpressions;
-using MdViewer.Core.Markdown;
+using MdViewer.Interop.Markdown;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;

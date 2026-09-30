@@ -1,5 +1,4 @@
-using MdViewer.Core;
-using MdViewer.Core.Pandoc;
+using MdViewer.Interop;
 using MdViewer.Services;
 using MdViewer.ViewModels;
 
@@ -18,6 +17,7 @@ var scratch = Directory.CreateTempSubdirectory("md-viewer-vm-");
 try
 {
     var settingsPath = Path.Combine(scratch.FullName, "settings.json");
+    Core.Configure(Path.Combine(scratch.FullName, "data"));
     var dialogs = new FakeDialogs();
     var vm = new MainViewModel(dialogs, ViewerSettings.Load(settingsPath));
 
@@ -104,7 +104,7 @@ try
     Check("crawl rejects bad url", dialogs.Errors.Count == 3 && vm.Origin == DocumentOrigin.Markdown && !vm.IsCrawling);
 
     // Pandoc-backed commands, when Pandoc is available.
-    if (PandocLocator.Find() is not null)
+    if (HasPandoc())
     {
         var html = Path.Combine(scratch.FullName, "page.html");
         await File.WriteAllTextAsync(html, "<h1>Imported</h1><p>From <b>HTML</b>.</p>");
@@ -147,6 +147,12 @@ finally { scratch.Delete(recursive: true); }
 
 Console.WriteLine(failures == 0 ? $"PASS  {checks} view-model checks" : $"{failures} of {checks} view-model checks failed");
 return failures == 0 ? 0 : 1;
+
+static bool HasPandoc()
+{
+    try { Core.PandocPath(); return true; }
+    catch (NativeCoreException) { return false; }
+}
 
 sealed class FakeDialogs : IViewerDialogs
 {

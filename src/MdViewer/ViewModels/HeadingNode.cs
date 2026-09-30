@@ -1,5 +1,5 @@
 using System.Collections.ObjectModel;
-using MdViewer.Core.Markdown;
+using MdViewer.Interop.Markdown;
 
 namespace MdViewer.ViewModels;
 

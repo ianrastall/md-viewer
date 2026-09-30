@@ -1,4 +1,5 @@
-using MdViewer.Core;
+using MdViewer.Interop;
+using MdViewer.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.Windows.AppLifecycle;
 using Windows.ApplicationModel.Activation;
@@ -19,6 +20,8 @@ public partial class App : Application
 
     protected override async void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
     {
+        try { Core.Configure(ViewerSettings.DataDirectory); }
+        catch (NativeCoreException ex) { AppLog.Write("Native core unavailable", ex); }
         window = new MainWindow();
         window.Activate();
         await window.StartAsync(LaunchFile());
