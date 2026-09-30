@@ -1,0 +1,21 @@
+cmake_minimum_required(VERSION 3.24)
+project(mdv_native VERSION 1.0.0 LANGUAGES C CXX)
+
+# md4c is vendored unchanged; see vendor/md4c/REVISION.
+add_library(md4c STATIC vendor/md4c/md4c.c vendor/md4c/entity.c)
+target_include_directories(md4c PUBLIC vendor/md4c)
+target_compile_definitions(md4c PRIVATE MD4C_USE_UTF8)
+set_property(TARGET md4c PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+set_property(TARGET md4c PROPERTY POSITION_INDEPENDENT_CODE ON)
+
+add_library(mdv_native SHARED src/mdv_native.cpp)
+target_compile_features(mdv_native PRIVATE cxx_std_20)
+target_include_directories(mdv_native PUBLIC include)
+target_link_libraries(mdv_native PRIVATE md4c)
+target_compile_definitions(mdv_native PRIVATE MDV_NATIVE_BUILD NDEBUG)
+set_property(TARGET mdv_native PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+if(MSVC)
+  target_compile_options(mdv_native PRIVATE /W4 /EHsc /utf-8)
+else()
+  target_compile_options(mdv_native PRIVATE -Wall -Wextra)
+endif()

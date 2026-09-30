@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <RootNamespace>MdViewer</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>false</SelfContained>
+    <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
+    <PublishTrimmed>false</PublishTrimmed>
+    <PublishSingleFile>false</PublishSingleFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Include="Assets/*.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Update="Assets\AppIcon.ico" CopyToOutputDirectory="PreserveNewest" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.4.0" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <ProjectReference Include="../MdViewer.Core/MdViewer.Core.csproj" />
+    <Content Include="../../native/vendor/md4c/LICENSE.md" Link="licenses/md4c.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../build/native/Release/mdv_native.dll" Link="mdv_native.dll" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <!-- The unpackaged WinUI build emits these after normal content discovery.
+       Explicitly include them when publishing the self-contained package layout. -->
+  <Target Name="IncludeWinUIResourcesInPublish" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <_WinUIResource Include="$(TargetDir)$(AssemblyName).pri;$(TargetDir)**/*.xbf" />
+      <ResolvedFileToPublish Include="@(_WinUIResource)">
+        <RelativePath>%(_WinUIResource.RecursiveDir)%(_WinUIResource.Filename)%(_WinUIResource.Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+</Project>

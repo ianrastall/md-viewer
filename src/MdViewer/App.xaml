@@ -1,0 +1,34 @@
+<Application x:Class="MdViewer.App"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" RequestedTheme="Dark">
+ <Application.Resources>
+  <ResourceDictionary>
+   <ResourceDictionary.MergedDictionaries><XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" /></ResourceDictionary.MergedDictionaries>
+   <!-- Include WinUI's tonal variants so selection, focus, and dialog buttons
+        use the same green palette as the reading surface. -->
+   <Color x:Key="SystemAccentColor">#3FA466</Color>
+   <Color x:Key="SystemAccentColorLight1">#55BD7C</Color>
+   <Color x:Key="SystemAccentColorLight2">#72D495</Color>
+   <Color x:Key="SystemAccentColorLight3">#9BE7B5</Color>
+   <Color x:Key="SystemAccentColorDark1">#2F8650</Color>
+   <Color x:Key="SystemAccentColorDark2">#22683D</Color>
+   <Color x:Key="SystemAccentColorDark3">#164A2A</Color>
+   <SolidColorBrush x:Key="AccentBrush" Color="#93EFA8" />
+   <SolidColorBrush x:Key="AccentSurfaceBrush" Color="#1B3A26" />
+   <SolidColorBrush x:Key="TextBrush" Color="#E8F1EA" />
+   <SolidColorBrush x:Key="MutedBrush" Color="#9FB5A6" />
+   <SolidColorBrush x:Key="QuietBrush" Color="#7D9384" />
+   <SolidColorBrush x:Key="BackgroundBrush" Color="#111814" />
+   <SolidColorBrush x:Key="ChromeBrush" Color="#0B110D" />
+   <SolidColorBrush x:Key="SidebarBrush" Color="#141D17" />
+   <SolidColorBrush x:Key="SurfaceBrush" Color="#1A241D" />
+   <SolidColorBrush x:Key="LineBrush" Color="#2A3A2F" />
+   <SolidColorBrush x:Key="CodeSurfaceBrush" Color="#0D1510" />
+   <SolidColorBrush x:Key="CodeTextBrush" Color="#B9E8C6" />
+   <SolidColorBrush x:Key="LinkBrush" Color="#7FDB9C" />
+   <SolidColorBrush x:Key="QuoteBarBrush" Color="#2F8650" />
+   <Style TargetType="Button"><Setter Property="CornerRadius" Value="6" /></Style>
+   <Style TargetType="TextBox"><Setter Property="CornerRadius" Value="6" /></Style>
+  </ResourceDictionary>
+ </Application.Resources>
+</Application>

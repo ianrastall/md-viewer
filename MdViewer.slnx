@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="src/MdViewer.Core/MdViewer.Core.csproj" />
+  <Project Path="src/MdViewer/MdViewer.csproj" />
+  <Project Path="tests/MdViewer.Core.Tests/MdViewer.Core.Tests.csproj" />
+  <Project Path="tests/MdViewer.Tests/MdViewer.Tests.csproj" />
+</Solution>
