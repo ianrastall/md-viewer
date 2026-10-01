@@ -1,8 +1,16 @@
 # Builds a GitHub release: tests, publishes the self-contained app, compiles the Inno Setup installer,
 # and zips the installer with install notes. Output: artifacts\release\md-viewer-<version>-windows-x64.zip
-param([switch]$SkipTests)
+#
+# Signing: md-viewer's own binaries, the installer, and its uninstaller are signed when a code-signing
+# certificate is available: -CertificateThumbprint, or else a valid one in your store whose subject is the
+# package publisher (CN=Ian Rastall). -Unsigned skips signing. Signatures are timestamped.
+param([switch]$SkipTests, [string]$CertificateThumbprint, [switch]$Unsigned, [string]$TimestampUrl = 'http://timestamp.digicert.com')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
+. "$PSScriptRoot\signing.ps1"
+$certificate = if ($Unsigned) { $null } else { Resolve-SigningCertificate $CertificateThumbprint (Get-PackagePublisher $root) }
+if ($certificate) { Write-Host "Signing with $($certificate.Subject) ($($certificate.Thumbprint), valid until $($certificate.NotAfter.ToString('yyyy-MM-dd')))." }
+else { Write-Host 'No code-signing certificate selected; the release will be unsigned.' }
 $version = ([xml](Get-Content -LiteralPath (Join-Path $root 'Directory.Build.props') -Raw)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
 if (-not $version) { throw 'Directory.Build.props has no <Version>.' }
 $release = Join-Path $root 'artifacts\release'
@@ -25,7 +33,15 @@ foreach ($required in @('MdViewer.exe', 'MdViewer.pri', 'App.xbf', 'MainWindow.x
     if (-not (Test-Path -LiteralPath (Join-Path $app $required))) { throw "The release is missing $required" }
 }
 
-& $iscc /Qp "/DAppVersion=$version" "/DSourceDir=$app" "/DOutputDir=$release" (Join-Path $root 'installer\md-viewer.iss')
+$innoArguments = @('/Qp', "/DAppVersion=$version", "/DSourceDir=$app", "/DOutputDir=$release")
+if ($certificate) {
+    # md-viewer's own code; third-party binaries (.NET, Windows App SDK, PDFium) keep their publishers' signatures.
+    Invoke-CodeSigning $certificate $TimestampUrl @('MdViewer.exe', 'MdViewer.dll', 'MdViewer.Interop.dll', 'mdv_native.dll' | ForEach-Object { Join-Path $app $_ })
+    # Inno Setup runs this for setup.exe and the uninstaller; $f is the file and $q a quote.
+    $signCommand = '$q' + (Get-SignTool) + '$q ' + ((Get-SignArguments $certificate $TimestampUrl) -join ' ') + ' $f'
+    $innoArguments += @('/DSign', "/Smdviewer=$signCommand")
+}
+& $iscc @innoArguments (Join-Path $root 'installer\md-viewer.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup could not build the installer.' }
 $setup = Join-Path $release "md-viewer-$version-setup.exe"
 
@@ -34,7 +50,7 @@ md-viewer $version for Windows 10 (version 2004) and Windows 11, 64-bit
 
 Install
   1. Run md-viewer-$version-setup.exe. It installs for your account only and does not need administrator rights.
-  2. The installer is not code-signed, so Windows SmartScreen may say "Windows protected your PC".
+  2. Windows SmartScreen may say "Windows protected your PC" for a new release.
      Choose "More info", then "Run anyway".
   3. Open md-viewer from the Start menu. It also appears under "Open with" for .md files.
 
@@ -61,3 +77,4 @@ Remove-Item -LiteralPath $staging -Recurse -Force
 Write-Host "Installer: $setup"
 Write-Host "Release zip: $zip"
 foreach ($file in $setup, $zip) { Write-Host ("SHA-256 {0}  {1}" -f (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant(), (Split-Path $file -Leaf)) }
+if ($certificate) { foreach ($file in $setup, (Join-Path $app 'MdViewer.exe'), (Join-Path $app 'mdv_native.dll')) { Show-Signature $file } }

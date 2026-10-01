@@ -1,4 +1,5 @@
-param([switch]$Install, [switch]$Test)
+# Signs the MSIX when a code-signing certificate for the package publisher is available (see signing.ps1).
+param([switch]$Install, [switch]$Test, [string]$CertificateThumbprint, [switch]$Unsigned, [string]$TimestampUrl = 'http://timestamp.digicert.com')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $layout = Join-Path $root 'artifacts\package'
@@ -28,5 +29,13 @@ Copy-Item -LiteralPath (Join-Path $root 'packaging\AppxManifest.xml') -Destinati
 Copy-Item -LiteralPath (Join-Path $root 'THIRD_PARTY_NOTICES.md') -Destination $layout
 & $makeAppx pack /d $layout /p $msix /o *> (Join-Path $root 'artifacts\package-build.log')
 if ($LASTEXITCODE -ne 0) { throw 'MSIX validation/packing failed. See artifacts\package-build.log.' }
-Write-Host "Package: $msix (unsigned; sign before distribution)"
+. "$PSScriptRoot\signing.ps1"
+$certificate = if ($Unsigned) { $null } else { Resolve-SigningCertificate $CertificateThumbprint $manifest.Package.Identity.Publisher }
+if ($certificate) {
+    Invoke-CodeSigning $certificate $TimestampUrl @($msix)
+    Write-Host "Package: $msix"
+    Show-Signature $msix
+} else {
+    Write-Host "Package: $msix (unsigned; no code-signing certificate for $($manifest.Package.Identity.Publisher))"
+}
 if ($Install) { & "$PSScriptRoot\install.ps1" }

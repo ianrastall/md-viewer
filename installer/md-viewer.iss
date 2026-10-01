@@ -41,6 +41,11 @@ SolidCompression=yes
 ChangesAssociations=yes
 CloseApplications=yes
 RestartApplications=no
+#ifdef Sign
+; scripts\release.ps1 defines the "mdviewer" sign tool when a code-signing certificate is available.
+SignTool=mdviewer
+SignedUninstaller=yes
+#endif
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

@@ -8,7 +8,7 @@ Built with **WinUI 3, C# 14, .NET 10, CommunityToolkit.Mvvm, and C++20**. The pr
 
 ## Install
 
-Download `md-viewer-<version>-windows-x64.zip` from [Releases](https://github.com/ianrastall/md-viewer/releases), unzip it, and run `md-viewer-<version>-setup.exe`. It installs for your account only, without administrator rights, and includes everything md-viewer needs (.NET, the Windows App SDK, and the C++ core). Windows 10 version 2004 or later, 64-bit, is required. The installer is not code-signed, so SmartScreen may show **Windows protected your PC**; choose **More info → Run anyway**. Installing a newer version replaces the old one and keeps your settings; remove md-viewer through **Settings → Apps → Installed apps**.
+Download `md-viewer-<version>-windows-x64.zip` from [Releases](https://github.com/ianrastall/md-viewer/releases), unzip it, and run `md-viewer-<version>-setup.exe`. It installs for your account only, without administrator rights, and includes everything md-viewer needs (.NET, the Windows App SDK, and the C++ core). Windows 10 version 2004 or later, 64-bit, is required. SmartScreen may show **Windows protected your PC** for an unsigned or newly released build; choose **More info → Run anyway**. Installing a newer version replaces the old one and keeps your settings; remove md-viewer through **Settings → Apps → Installed apps**.
 
 Pandoc and Tesseract are optional and installed separately; md-viewer's **Tools** window installs and updates them.
 
@@ -83,7 +83,13 @@ Rebuild the icon sizes from `src/MdViewer/Assets/MdViewerIconMaster.png` with `.
 .\scripts\release.ps1
 ```
 
-This runs the tests, publishes the self-contained app to `artifacts/release/app`, builds `md-viewer-<version>-setup.exe` from `installer/md-viewer.iss` with Inno Setup, and zips it with install notes, the license, and third-party notices as `artifacts/release/md-viewer-<version>-windows-x64.zip`, printing SHA-256 hashes of both. Upload the zip to a GitHub release. The version comes from `<Version>` in `Directory.Build.props`; keep `packaging/AppxManifest.xml` in step. The installer is a per-user, unpackaged install, so its data lives in `%LOCALAPPDATA%\md-viewer`.
+This runs the tests, publishes the self-contained app to `artifacts/release/app`, builds `md-viewer-<version>-setup.exe` from `installer/md-viewer.iss` with Inno Setup, and zips it with install notes, the license, and third-party notices as `artifacts/release/md-viewer-<version>-windows-x64.zip`, printing SHA-256 hashes of both. Upload the zip to a GitHub release.
+
+#### Signing
+
+`release.ps1` signs md-viewer's own binaries (`MdViewer.exe`, its managed assemblies, and `mdv_native.dll`), the installer, and the uninstaller when a code-signing certificate is available, and `package.ps1` signs the MSIX the same way. It uses `-CertificateThumbprint`, or else the newest valid code-signing certificate in your user store whose subject is the package publisher, `CN=Ian Rastall`. The private key stays in the certificate store. Signatures are timestamped (`-TimestampUrl`, DigiCert's by default) so they stay valid after the certificate expires. `-Unsigned` builds without signing; with no certificate the build is unsigned and says so.
+
+A self-signed certificate only satisfies machines that trust it, so it does not remove SmartScreen warnings for people downloading from GitHub. That needs a publicly trusted certificate, for example [Azure Artifact Signing](https://azure.microsoft.com/en-us/products/artifact-signing) or [SignPath Foundation](https://signpath.org/terms.html) (free for open-source projects); new releases can still show a milder SmartScreen prompt until they build reputation. MSIX signing requires the certificate subject to equal the manifest's `Publisher`. The version comes from `<Version>` in `Directory.Build.props`; keep `packaging/AppxManifest.xml` in step. The installer is a per-user, unpackaged install, so its data lives in `%LOCALAPPDATA%\md-viewer`.
 
 ## Project layout
 
