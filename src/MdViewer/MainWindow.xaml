@@ -57,8 +57,8 @@
      <AppBarToggleButton.Icon><FontIcon Glyph="&#xE943;" /></AppBarToggleButton.Icon>
     </AppBarToggleButton>
     <CommandBar.SecondaryCommands>
-     <AppBarButton Label="Fetch Pandoc" Command="{x:Bind ViewModel.FetchPandocCommand}" ToolTipService.ToolTip="Download the latest Pandoc for import, export, crawl, and format">
-      <AppBarButton.Icon><FontIcon Glyph="&#xE896;" /></AppBarButton.Icon>
+     <AppBarButton Label="Tools..." Command="{x:Bind ViewModel.OpenToolsCommand}" ToolTipService.ToolTip="Pandoc and Tesseract: what is installed, updates, and OCR settings">
+      <AppBarButton.Icon><FontIcon Glyph="&#xE90F;" /></AppBarButton.Icon>
      </AppBarButton>
      <AppBarButton Icon="ClosePane" Label="Exit" Command="{x:Bind ViewModel.ExitCommand}" />
     </CommandBar.SecondaryCommands>
@@ -90,6 +90,10 @@
    <controls:PaneSplitter x:Name="Splitter" Grid.Column="1" />
    <Grid Grid.Column="2">
     <controls:MarkdownView x:Name="Reader" Visibility="{x:Bind ViewModel.IsRichView, Mode=OneWay}" />
+    <InfoBar x:Name="UpdateBar" Canvas.ZIndex="1" Margin="24,14,24,0" VerticalAlignment="Top" MaxWidth="760" Severity="Informational" Title="Tools"
+             Message="{x:Bind ViewModel.UpdateNotice, Mode=OneWay}" IsOpen="{x:Bind ViewModel.HasUpdateNotice, Mode=OneWay}" CloseButtonClick="UpdateBar_Close">
+     <InfoBar.ActionButton><Button Content="Open Tools" Command="{x:Bind ViewModel.OpenToolsCommand}" /></InfoBar.ActionButton>
+    </InfoBar>
     <TextBox x:Name="RawEditor" Text="{x:Bind ViewModel.MarkdownText, Mode=OneWay}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
              FontFamily="Cascadia Mono, Consolas" FontSize="{x:Bind ViewModel.RawFontSize, Mode=OneWay}" Padding="48,30,48,80" BorderThickness="0" Background="Transparent"
              IsSpellCheckEnabled="False" IsTextPredictionEnabled="False" ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Markdown source"

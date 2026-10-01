@@ -10,7 +10,7 @@ public sealed class NativeCoreException(string message) : Exception(message);
 internal static unsafe partial class Native
 {
     private const string Library = "mdv_native";
-    private const int ExpectedAbi = 2;
+    private const int ExpectedAbi = 3;
     private const int Ok = 0, Cancelled = 2;
     private static int abiChecked;
 
@@ -38,8 +38,11 @@ internal static unsafe partial class Native
     internal static partial Result* PandocFormat(byte* utf8, nuint length, delegate* unmanaged[Cdecl]<nint, byte*, int> progress, nint context);
     [LibraryImport(Library, EntryPoint = "mdv_pandoc_export", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial Result* PandocExport(byte* utf8, nuint length, string target, string? resourceDirectory, delegate* unmanaged[Cdecl]<nint, byte*, int> progress, nint context);
-    [LibraryImport(Library, EntryPoint = "mdv_pandoc_fetch")]
-    internal static partial Result* PandocFetch(delegate* unmanaged[Cdecl]<nint, byte*, int> progress, nint context);
+    [LibraryImport(Library, EntryPoint = "mdv_configure_ocr", StringMarshalling = StringMarshalling.Utf8)] internal static partial void ConfigureOcr(string engine, string languages);
+    [LibraryImport(Library, EntryPoint = "mdv_tools_status")]
+    internal static partial Result* ToolsStatus(int checkLatest, delegate* unmanaged[Cdecl]<nint, byte*, int> progress, nint context);
+    [LibraryImport(Library, EntryPoint = "mdv_tool_install", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial Result* ToolInstall(string tool, delegate* unmanaged[Cdecl]<nint, byte*, int> progress, nint context);
     [LibraryImport(Library, EntryPoint = "mdv_crawl", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial Result* Crawl(string startUrl, int maxPages, delegate* unmanaged[Cdecl]<nint, byte*, int> progress, nint context);
 

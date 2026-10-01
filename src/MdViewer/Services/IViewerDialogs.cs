@@ -11,4 +11,5 @@ public interface IViewerDialogs
     Task<UnsavedChoice> ConfirmUnsavedAsync(string documentName);
     Task ShowErrorAsync(string title, string message);
     void CloseWindow();
+    void ShowTools();
 }

@@ -8,6 +8,11 @@ public sealed class ViewerSettings
     public int ZoomPercent { get; set; } = 100;
     public double OutlineWidth { get; set; } = 280;
     public string? LastFolder { get; set; }
+    /// <summary>"auto" (Tesseract when installed), "windows", or "tesseract".</summary>
+    public string OcrEngine { get; set; } = "auto";
+    public string TesseractLanguages { get; set; } = "eng";
+    public bool CheckToolsAutomatically { get; set; } = true;
+    public DateTimeOffset? LastToolCheck { get; set; }
     [JsonIgnore] public string StoragePath { get; init; } = DefaultPath;
 
     /// <summary>
@@ -32,7 +37,11 @@ public sealed class ViewerSettings
         try
         {
             var settings = JsonSerializer.Deserialize<ViewerSettings>(File.ReadAllText(path)) ?? new();
-            return new ViewerSettings { ZoomPercent = settings.ZoomPercent, OutlineWidth = settings.OutlineWidth, LastFolder = settings.LastFolder, StoragePath = path };
+            return new ViewerSettings
+            {
+                ZoomPercent = settings.ZoomPercent, OutlineWidth = settings.OutlineWidth, LastFolder = settings.LastFolder, OcrEngine = settings.OcrEngine,
+                TesseractLanguages = settings.TesseractLanguages, CheckToolsAutomatically = settings.CheckToolsAutomatically, LastToolCheck = settings.LastToolCheck, StoragePath = path
+            };
         }
         catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { return new() { StoragePath = path }; }
     }

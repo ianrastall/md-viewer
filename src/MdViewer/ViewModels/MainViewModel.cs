@@ -41,6 +41,9 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] public partial bool IsCrawling { get; private set; }
     [ObservableProperty] public partial bool IsImporting { get; private set; }
     [ObservableProperty] public partial string CrawlStatus { get; private set; } = "";
+    [ObservableProperty] public partial string UpdateNotice { get; private set; } = "";
+    public bool HasUpdateNotice => UpdateNotice.Length > 0;
+    public ViewerSettings Settings => settings;
     public ObservableCollection<HeadingNode> Headings { get; } = [];
 
     public string DocumentTitle => Origin switch
@@ -85,6 +88,7 @@ public partial class MainViewModel : ObservableObject
     partial void OnEncodingLabelChanged(string value) => OnPropertyChanged(nameof(StatisticsText));
     partial void OnIsRawViewChanged(bool value) => OnPropertyChanged(nameof(IsRichView));
     partial void OnIsBusyChanged(bool value) => OnPropertyChanged(nameof(IsIdle));
+    partial void OnUpdateNoticeChanged(string value) => OnPropertyChanged(nameof(HasUpdateNotice));
     partial void OnDocumentChanged(MarkdownDocument? value)
     {
         Headings.Clear();
@@ -301,15 +305,22 @@ public partial class MainViewModel : ObservableObject
         Status = CrawlStatus = "Cancelling...";
     }
 
-    [RelayCommand]
-    private async Task FetchPandocAsync()
+    [RelayCommand] private void OpenTools() => dialogs.ShowTools();
+    public void DismissUpdateNotice() => UpdateNotice = "";
+
+    /// <summary>At most once a day, asks the C++ core whether Pandoc or Tesseract has a newer release.</summary>
+    public async Task CheckToolsInBackgroundAsync()
     {
-        if (IsBusy) return;
-        await RunAsync("Fetch Pandoc", async () =>
+        if (!settings.CheckToolsAutomatically || settings.LastToolCheck is { } last && DateTimeOffset.Now - last < TimeSpan.FromHours(20)) return;
+        try
         {
-            var result = await Core.FetchPandocAsync(new Progress<string>(s => Status = s));
-            Status = $"Pandoc {result.Version} is ready ({result.Path}).";
-        });
+            var status = await Core.ToolsStatusAsync(checkLatest: true, null);
+            settings.LastToolCheck = DateTimeOffset.Now;
+            settings.Save();
+            var updates = status.Tools.Where(t => t.UpdateAvailable).Select(t => $"{t.Name} {t.Latest}").ToArray();
+            if (updates.Length > 0) UpdateNotice = $"Updates are available: {string.Join(", ", updates)}.";
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { AppLog.Write("Background tool check", ex); }
     }
 
     [RelayCommand] private void ZoomIn() => ZoomPercent += ZoomStep;
@@ -415,7 +426,7 @@ public partial class MainViewModel : ObservableObject
         | Format | Normalizes Markdown through Pandoc: ATX headings, pipe tables, no hard wrapping |
         | Reflow | Repairs skipped heading levels so the outline nests cleanly |
 
-        Pandoc is needed for Word, HTML, EPUB, export, crawl, and format. If it is not installed, choose **Fetch Pandoc** in the ⋯ menu.
+        Pandoc is needed for Word, HTML, EPUB, export, crawl, and format; Tesseract, if installed, reads scanned PDF pages. **Tools** (in the ⋯ menu) shows what is installed, checks for updates, and installs either one.
 
         Save (Ctrl+S) keeps converted or edited documents as Markdown.
         """;

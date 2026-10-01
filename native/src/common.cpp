@@ -116,6 +116,11 @@ std::string normalize_newlines(std::string_view text) {
     return out;
 }
 
+std::string to_native_eol(std::string_view text) {
+    const auto normalized = normalize_newlines(text);
+    return NativeEol == "\n" ? normalized : replace_all(normalized, "\n", NativeEol);
+}
+
 std::vector<std::string> split_lines(std::string_view text) {
     std::vector<std::string> lines;
     size_t start = 0;

@@ -4,13 +4,15 @@
  * settings, the package); everything md-viewer *does* happens here: Markdown
  * parsing and reflow, reading and saving documents, importing (Pandoc and
  * PDF with Windows OCR), exporting, crawling documentation sites, and
- * fetching Pandoc.
+ * managing Pandoc and Tesseract.
  *
  * Conventions
  *  - Strings are UTF-8. Paths are UTF-8 and may be any Windows path.
  *  - Every function is exception-contained and never throws across the ABI.
  *  - Functions that produce data return an mdv_result*, which the caller
  *    must release with mdv_result_free. NULL means memory ran out.
+ *  - Text md-viewer produces (Format, imports, crawls) uses the platform's line
+ *    endings: CRLF on Windows.
  *  - Long operations take an mdv_progress_fn. It is called with a status
  *    line, or with NULL to poll; returning nonzero cancels the operation,
  *    which then returns MDV_CANCELLED. It may be called from worker threads.
@@ -35,7 +37,7 @@ extern "C" {
 #  define MDV_API __attribute__((visibility("default")))
 #endif
 
-#define MDV_ABI_VERSION 2
+#define MDV_ABI_VERSION 3
 
 #define MDV_OK 0
 #define MDV_ERROR 1        /* data holds a message for the user */
@@ -56,6 +58,11 @@ MDV_API void mdv_result_free(mdv_result* result);
 /* Where md-viewer keeps fetched Pandoc and its Pandoc filter. The frame passes
  * the package's LocalState folder; the default is %LOCALAPPDATA%\md-viewer. */
 MDV_API void mdv_configure(const char* data_directory);
+
+/* OCR for scanned PDF pages. engine: "auto" (Tesseract when installed, else
+ * Windows OCR), "windows", or "tesseract". languages: Tesseract languages such
+ * as "eng" or "eng+deu"; missing ones are skipped with a warning. */
+MDV_API void mdv_configure_ocr(const char* engine, const char* languages);
 
 /* Supported file types, one per line: "<kind>\t<extension>\t<label>", where
  * kind is markdown, pandoc, pdf, or export. */
@@ -91,8 +98,17 @@ MDV_API mdv_result* mdv_pandoc_format(const char* utf8, size_t length, mdv_progr
 /* Writes the format implied by the target's extension. resource_directory may be NULL. */
 MDV_API mdv_result* mdv_pandoc_export(const char* utf8, size_t length, const char* target, const char* resource_directory,
                                       mdv_progress_fn progress, void* context);
-/* Downloads the latest official Windows x64 Pandoc. Payload: "<version>\n<path>". */
-MDV_API mdv_result* mdv_pandoc_fetch(mdv_progress_fn progress, void* context);
+/* ---- Tools -------------------------------------------------------------- */
+
+/* Pandoc, Tesseract, and Windows OCR: whether each is installed, where, which
+ * version, and its languages; with check_latest, also the newest official
+ * release and whether an update is available. Payload: JSON. */
+MDV_API mdv_result* mdv_tools_status(int32_t check_latest, mdv_progress_fn progress, void* context);
+
+/* Installs or updates "pandoc" (into the data directory) or "tesseract" (by
+ * running the official installer, which asks for administrator permission).
+ * Downloads are checked against GitHub's published SHA-256. Payload: a status line. */
+MDV_API mdv_result* mdv_tool_install(const char* tool, mdv_progress_fn progress, void* context);
 
 /* ---- Crawling ----------------------------------------------------------- */
 

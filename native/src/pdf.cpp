@@ -1,5 +1,9 @@
 #include "pdf.h"
 
+#include "files.h"
+#include "subprocess.h"
+#include "tools.h"
+
 #include <windows.h>
 
 #include "fpdf_text.h"
@@ -14,7 +18,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <mutex>
+#include <optional>
 
 namespace mdv {
 namespace {
@@ -150,29 +156,42 @@ std::wstring page_text(FPDF_PAGE page) {
     return text;
 }
 
-std::wstring recognize(FPDF_PAGE page, const OcrEngine& engine) {
+// A page rendered on white, as opaque BGRA rows.
+struct Raster {
+    int width = 0, height = 0;
+    std::vector<unsigned char> bgra;
+};
+
+Raster render(FPDF_PAGE page, double scale, double limit) {
     const double width = FPDF_GetPageWidthF(page), height = FPDF_GetPageHeightF(page);
     if (width <= 0 || height <= 0) throw Error("PDF page has invalid dimensions.");
-    const double limit = OcrEngine::MaxImageDimension();
-    const double scale = std::min({OcrTargetScale, limit / width, limit / height});
-    const int pixels_wide = std::max(1, static_cast<int>(std::lround(width * scale)));
-    const int pixels_high = std::max(1, static_cast<int>(std::lround(height * scale)));
-    FPDF_BITMAP bitmap = FPDFBitmap_CreateEx(pixels_wide, pixels_high, FPDFBitmap_BGRA, nullptr, 0);
+    scale = std::min({scale, limit / width, limit / height});
+    Raster raster;
+    raster.width = std::max(1, static_cast<int>(std::lround(width * scale)));
+    raster.height = std::max(1, static_cast<int>(std::lround(height * scale)));
+    FPDF_BITMAP bitmap = FPDFBitmap_CreateEx(raster.width, raster.height, FPDFBitmap_BGRA, nullptr, 0);
     if (!bitmap) throw Error("Could not render the page for OCR.");
-    FPDFBitmap_FillRect(bitmap, 0, 0, pixels_wide, pixels_high, 0xFFFFFFFF);
-    FPDF_RenderPageBitmap(bitmap, page, 0, 0, pixels_wide, pixels_high, 0, FPDF_ANNOT | FPDF_PRINTING);
+    FPDFBitmap_FillRect(bitmap, 0, 0, raster.width, raster.height, 0xFFFFFFFF);
+    FPDF_RenderPageBitmap(bitmap, page, 0, 0, raster.width, raster.height, 0, FPDF_ANNOT | FPDF_PRINTING);
     const int stride = FPDFBitmap_GetStride(bitmap);
     const auto* pixels = static_cast<const unsigned char*>(FPDFBitmap_GetBuffer(bitmap));
-    const uint32_t row = static_cast<uint32_t>(pixels_wide) * 4;
-    winrt::Windows::Storage::Streams::Buffer buffer(row * static_cast<uint32_t>(pixels_high));
-    for (int y = 0; y < pixels_high; ++y) {
-        auto* target = buffer.data() + static_cast<size_t>(y) * row;
+    const size_t row = static_cast<size_t>(raster.width) * 4;
+    raster.bgra.resize(row * static_cast<size_t>(raster.height));
+    for (int y = 0; y < raster.height; ++y) {
+        auto* target = raster.bgra.data() + static_cast<size_t>(y) * row;
         std::memcpy(target, pixels + static_cast<size_t>(y) * static_cast<size_t>(stride), row);
-        for (uint32_t x = 3; x < row; x += 4) target[x] = 0xFF;  // opaque
+        for (size_t x = 3; x < row; x += 4) target[x] = 0xFF;  // opaque
     }
-    buffer.Length(row * static_cast<uint32_t>(pixels_high));
     FPDFBitmap_Destroy(bitmap);
-    const auto software = SoftwareBitmap::CreateCopyFromBuffer(buffer, BitmapPixelFormat::Bgra8, pixels_wide, pixels_high, BitmapAlphaMode::Premultiplied);
+    return raster;
+}
+
+std::wstring recognize_windows(FPDF_PAGE page, const OcrEngine& engine) {
+    const auto raster = render(page, OcrTargetScale, OcrEngine::MaxImageDimension());
+    winrt::Windows::Storage::Streams::Buffer buffer(static_cast<uint32_t>(raster.bgra.size()));
+    std::memcpy(buffer.data(), raster.bgra.data(), raster.bgra.size());
+    buffer.Length(static_cast<uint32_t>(raster.bgra.size()));
+    const auto software = SoftwareBitmap::CreateCopyFromBuffer(buffer, BitmapPixelFormat::Bgra8, raster.width, raster.height, BitmapAlphaMode::Premultiplied);
     const auto result = engine.RecognizeAsync(software).get();
     std::wstring text;
     for (const auto& line : result.Lines()) {
@@ -183,6 +202,36 @@ std::wstring recognize(FPDF_PAGE page, const OcrEngine& engine) {
     }
     return text;
 }
+
+constexpr int TesseractDpi = 300;
+
+// Tesseract reads a grayscale PGM of the page at 300 dpi and writes UTF-8 text to stdout.
+std::wstring recognize_tesseract(FPDF_PAGE page, const std::string& executable, const std::string& languages, const std::string& scratch, const Progress& progress) {
+    const auto raster = render(page, TesseractDpi / 72.0, 12000);
+    std::string image = "P5\n" + std::to_string(raster.width) + " " + std::to_string(raster.height) + "\n255\n";
+    const size_t header = image.size();
+    image.resize(header + static_cast<size_t>(raster.width) * static_cast<size_t>(raster.height));
+    for (size_t i = 0, p = 0; i < image.size() - header; ++i, p += 4)
+        image[header + i] = static_cast<char>((raster.bgra[p] * 29 + raster.bgra[p + 1] * 150 + raster.bgra[p + 2] * 77) >> 8);
+    const auto file = join_path(scratch, "page-" + new_guid() + ".pgm");
+    write_file_atomic(file, image);
+    ProcessResult result;
+    try {
+        result = run_process(executable, {file, "stdout", "-l", languages, "--dpi", std::to_string(TesseractDpi), "--psm", "3"}, std::nullopt, "",
+                             std::chrono::minutes(3), progress);
+    } catch (...) {
+        DeleteFileW(widen(file).c_str());
+        throw;
+    }
+    DeleteFileW(widen(file).c_str());
+    if (result.exit_code != 0) throw Error(std::string(trim("Tesseract exited with code " + std::to_string(result.exit_code) + ". " + std::string(trim(result.error)))));
+    auto text = widen(result.output);
+    text.erase(std::remove(text.begin(), text.end(), L'\f'), text.end());
+    return text;
+}
+
+std::mutex preferences_mutex;
+OcrPreferences preferences;
 
 std::string sanitize_title(const std::string& title) {
     std::string out;
@@ -238,46 +287,78 @@ PdfImport import(const std::string& path, const Progress& progress) {
     }
 
     if (std::any_of(texts.begin(), texts.end(), weak_text_layer)) {
-        progress.report("Running Windows OCR for pages with little or no extractable text...");
-        try { winrt::init_apartment(winrt::apartment_type::multi_threaded); } catch (const winrt::hresult_error&) {}
+        // Tesseract when installed (unless the user chose Windows OCR), otherwise Windows OCR.
+        const auto options = ocr_preferences();
+        std::optional<std::string> tesseract = options.engine == "windows" ? std::nullopt : find_tesseract();
+        if (!tesseract && options.engine == "tesseract") result.warnings.push_back("Tesseract was not found, so Windows OCR was used.");
+        std::function<std::wstring(FPDF_PAGE)> recognize;
+        std::string scratch;
         OcrEngine engine{nullptr};
-        try { engine = OcrEngine::TryCreateFromUserProfileLanguages(); } catch (const winrt::hresult_error&) {}
-        if (!engine) {
-            result.warnings.push_back("Windows OCR is unavailable for the current user languages.");
-            progress.report(result.warnings.back());
+        if (tesseract) {
+            const auto installed = tesseract_languages(*tesseract);
+            std::string languages;
+            std::vector<std::string> missing;
+            for (const auto& part : split_lines(replace_all(options.languages, "+", "\n"))) {
+                const auto name = std::string(trim(part));
+                if (name.empty()) continue;
+                if (std::find(installed.begin(), installed.end(), name) != installed.end()) languages += (languages.empty() ? "" : "+") + name;
+                else missing.push_back(name);
+            }
+            if (!missing.empty()) {
+                std::string list;
+                for (const auto& name : missing) list += (list.empty() ? "" : ", ") + name;
+                result.warnings.push_back("Tesseract language data is not installed for: " + list + ".");
+            }
+            if (languages.empty()) languages = std::find(installed.begin(), installed.end(), "eng") != installed.end() ? "eng" : installed.empty() ? "eng" : installed.front();
+            scratch = join_path(temp_directory(), "md-viewer-ocr-" + new_guid());
+            create_directories(scratch);
+            result.ocr_engine = "Tesseract (" + languages + ")";
+            recognize = [&, languages, executable = *tesseract](FPDF_PAGE page) { return recognize_tesseract(page, executable, languages, scratch, progress); };
+            progress.report("Running Tesseract OCR for pages with little or no extractable text...");
         } else {
-            for (int i = 0; i < result.page_count; ++i) {
-                progress.check();
-                auto& text = texts[static_cast<size_t>(i)];
-                if (!weak_text_layer(text)) continue;
-                const int number = i + 1;
-                progress.report("Running OCR on page " + format_count(number) + " of " + format_count(result.page_count) + "...");
-                try {
-                    FPDF_PAGE page = FPDF_LoadPage(document, i);
-                    if (!page) throw Error("the page could not be loaded.");
-                    std::wstring recognized;
-                    try { recognized = recognize(page, engine); } catch (...) { FPDF_ClosePage(page); throw; }
-                    FPDF_ClosePage(page);
-                    if (blank(recognized)) continue;
-                    if (prefer_ocr(text, recognized)) {
-                        text = recognized;
-                        result.ocr_pages.push_back(number);
-                    } else if (readable(recognized)) {
-                        result.warnings.push_back("OCR on page " + format_count(number) + " was not used because embedded text looked better.");
-                    }
-                } catch (const Cancelled&) {
-                    throw;
-                } catch (const winrt::hresult_error& ex) {
-                    result.warnings.push_back("OCR failed on page " + format_count(number) + ": " + winrt::to_string(ex.message()));
-                    progress.report(result.warnings.back());
-                } catch (const std::exception& ex) {
-                    result.warnings.push_back("OCR failed on page " + format_count(number) + ": " + ex.what());
-                    progress.report(result.warnings.back());
-                }
+            try { winrt::init_apartment(winrt::apartment_type::multi_threaded); } catch (const winrt::hresult_error&) {}
+            try { engine = OcrEngine::TryCreateFromUserProfileLanguages(); } catch (const winrt::hresult_error&) {}
+            if (engine) {
+                result.ocr_engine = "Windows OCR";
+                recognize = [&](FPDF_PAGE page) { return recognize_windows(page, engine); };
+                progress.report("Running Windows OCR for pages with little or no extractable text...");
+            } else {
+                result.warnings.push_back("Windows OCR is unavailable for the current user languages.");
+                progress.report(result.warnings.back());
             }
         }
+        struct Scratch { const std::string& path; ~Scratch() { if (!path.empty()) RemoveDirectoryW(widen(path).c_str()); } } scratch_cleanup{scratch};
+        for (int i = 0; recognize && i < result.page_count; ++i) {
+            progress.check();
+            auto& text = texts[static_cast<size_t>(i)];
+            if (!weak_text_layer(text)) continue;
+            const int number = i + 1;
+            progress.report("Running OCR on page " + format_count(number) + " of " + format_count(result.page_count) + "...");
+            try {
+                FPDF_PAGE page = FPDF_LoadPage(document, i);
+                if (!page) throw Error("the page could not be loaded.");
+                std::wstring recognized;
+                try { recognized = recognize(page); } catch (...) { FPDF_ClosePage(page); throw; }
+                FPDF_ClosePage(page);
+                if (blank(recognized)) continue;
+                if (prefer_ocr(text, recognized)) {
+                    text = recognized;
+                    result.ocr_pages.push_back(number);
+                } else if (readable(recognized)) {
+                    result.warnings.push_back("OCR on page " + format_count(number) + " was not used because embedded text looked better.");
+                }
+            } catch (const Cancelled&) {
+                throw;
+            } catch (const winrt::hresult_error& ex) {
+                result.warnings.push_back("OCR failed on page " + format_count(number) + ": " + winrt::to_string(ex.message()));
+                progress.report(result.warnings.back());
+            } catch (const std::exception& ex) {
+                result.warnings.push_back("OCR failed on page " + format_count(number) + ": " + ex.what());
+                progress.report(result.warnings.back());
+            }
+        }
+        if (result.ocr_pages.empty()) result.ocr_engine.clear();
     }
-
     for (int i = 0; i < result.page_count; ++i)
         if (!readable(texts[static_cast<size_t>(i)])) result.missing_pages.push_back(i + 1);
     if (static_cast<int>(result.missing_pages.size()) == result.page_count) throw Error("No readable text could be extracted from this PDF.");
@@ -288,7 +369,7 @@ PdfImport import(const std::string& path, const Progress& progress) {
     }
 
     std::string markdown = "<!--\nPDF import: " + std::to_string(result.page_count) + " page(s)\nEmbedded text pages: " +
-                           std::to_string(result.embedded_pages) + "\nOCR pages: " + join_numbers(result.ocr_pages) +
+                           std::to_string(result.embedded_pages) + "\nOCR pages: " + join_numbers(result.ocr_pages) + (result.ocr_engine.empty() ? "" : " (" + result.ocr_engine + ")") +
                            "\nMissing pages: " + join_numbers(result.missing_pages) + "\n";
     for (const auto& warning : result.warnings) markdown += "Warning: " + warning + "\n";
     markdown += "-->\n\n# " + sanitize_title(stem_of(path)) + "\n\n";
@@ -299,11 +380,27 @@ PdfImport import(const std::string& path, const Progress& progress) {
         if (trim(page).empty()) continue;
         markdown += "<!-- Page " + std::to_string(i + 1) + " -->\n\n" + page + "\n\n";
     }
-    result.markdown = std::string(trim_end(markdown)) + "\n";
+    result.markdown = to_native_eol(std::string(trim_end(markdown)) + "\n");
     return result;
 }
 
 }  // namespace
+
+void set_ocr_preferences(OcrPreferences value) {
+    if (value.engine != "windows" && value.engine != "tesseract") value.engine = "auto";
+    if (trim(value.languages).empty()) value.languages = "eng";
+    std::lock_guard lock(preferences_mutex);
+    preferences = std::move(value);
+}
+
+OcrPreferences ocr_preferences() {
+    std::lock_guard lock(preferences_mutex);
+    return preferences;
+}
+
+std::string active_ocr_engine() {
+    return ocr_preferences().engine != "windows" && find_tesseract() ? "tesseract" : "windows";
+}
 
 PdfImport import_pdf(const std::string& path, const Progress& progress) {
     try {

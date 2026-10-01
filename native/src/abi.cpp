@@ -3,7 +3,7 @@
 
 #include "common.h"
 #include "crawl.h"
-#include "download.h"
+#include "tools.h"
 #include "files.h"
 #include "markdown.h"
 #include "pandoc.h"
@@ -86,7 +86,7 @@ std::string open_document(const std::string& path, const Progress& progress) {
     if (extension_of(path) == ".pdf") {
         const auto pdf = import_pdf(path, progress);
         std::string summary = "Imported " + name;
-        if (!pdf.ocr_pages.empty()) summary += "; OCR on " + format_count(static_cast<long long>(pdf.ocr_pages.size())) + " page(s)";
+        if (!pdf.ocr_pages.empty()) summary += "; OCR on " + format_count(static_cast<long long>(pdf.ocr_pages.size())) + " page(s) with " + pdf.ocr_engine;
         if (!pdf.missing_pages.empty()) summary += "; " + format_count(static_cast<long long>(pdf.missing_pages.size())) + " unreadable page(s)";
         else if (!pdf.warnings.empty()) summary += "; " + format_count(static_cast<long long>(pdf.warnings.size())) + " warning(s)";
         return "imported\nUTF-8\n" + summary + ".\n" + pdf.markdown;
@@ -109,6 +109,10 @@ MDV_API void mdv_result_free(mdv_result* result) {
 
 MDV_API void mdv_configure(const char* data_directory) {
     try { set_data_directory(data_directory ? data_directory : ""); } catch (...) {}
+}
+
+MDV_API void mdv_configure_ocr(const char* engine, const char* languages) {
+    try { set_ocr_preferences({engine ? engine : "auto", languages ? languages : "eng"}); } catch (...) {}
 }
 
 MDV_API mdv_result* mdv_file_types(void) {
@@ -154,11 +158,12 @@ MDV_API mdv_result* mdv_pandoc_export(const char* utf8, size_t length, const cha
     });
 }
 
-MDV_API mdv_result* mdv_pandoc_fetch(mdv_progress_fn progress, void* context) {
-    return guard([&] {
-        const auto fetched = fetch_pandoc(Progress(progress, context));
-        return fetched.version + "\n" + fetched.path;
-    });
+MDV_API mdv_result* mdv_tools_status(int32_t check_latest, mdv_progress_fn progress, void* context) {
+    return guard([&] { return tools_status_json(check_latest != 0, Progress(progress, context)); });
+}
+
+MDV_API mdv_result* mdv_tool_install(const char* tool, mdv_progress_fn progress, void* context) {
+    return guard([&] { return install_tool(required(tool, "tool"), Progress(progress, context)); });
 }
 
 MDV_API mdv_result* mdv_crawl(const char* start_url, int32_t max_pages, mdv_progress_fn progress, void* context) {

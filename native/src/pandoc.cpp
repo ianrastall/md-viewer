@@ -60,13 +60,6 @@ std::vector<std::string> writer_options() {
     return {"--wrap=none", "--markdown-headings=atx", "--eol=lf", "--lua-filter=" + filter_path()};
 }
 
-// True when most line breaks are CRLF, so Format can hand the document back in its own style.
-bool prefers_crlf(std::string_view text) {
-    size_t crlf = 0, lf = 0;
-    for (size_t i = 0; i < text.size(); ++i)
-        if (text[i] == '\n') (i > 0 && text[i - 1] == '\r' ? crlf : lf)++;
-    return crlf > 0 && crlf >= lf;
-}
 
 std::string run(std::vector<std::string> arguments, const std::optional<std::string>& input, const std::string& working_directory,
                 std::optional<std::chrono::milliseconds> timeout, const Progress& progress) {
@@ -108,7 +101,7 @@ std::optional<std::string> find_pandoc() {
 
 std::string pandoc_path() {
     if (auto found = find_pandoc()) return *found;
-    throw Error("Pandoc was not found. Use Fetch Pandoc (in the \xE2\x8B\xAF menu) to download it, or install Pandoc and add it to PATH.");
+    throw Error("Pandoc was not found. Open Tools (in the \xE2\x8B\xAF menu) to download it, or install Pandoc and add it to PATH.");
 }
 
 std::string pandoc_import(const std::string& path, const Progress& progress) {
@@ -117,21 +110,20 @@ std::string pandoc_import(const std::string& path, const Progress& progress) {
     for (auto& option : writer_options()) arguments.push_back(std::move(option));
     const auto extension = extension_of(path);
     if (extension == ".html" || extension == ".htm") arguments.insert(arguments.begin(), {"-f", "html"});
-    return run(arguments, std::nullopt, directory_of(path), std::nullopt, progress);
+    return to_native_eol(run(arguments, std::nullopt, directory_of(path), std::nullopt, progress));
 }
 
 std::string pandoc_format(std::string_view markdown, const Progress& progress) {
     // md-viewer (like most editors) treats CR-only and doubled CR CR LF endings as line breaks, but
     // Pandoc reads a lone CR as a space and would merge every paragraph into one. Give Pandoc plain
-    // LF text, then return the result in the document's own line-ending style.
-    const bool crlf = prefers_crlf(markdown);
+    // LF text, then return the result with the platform's line endings.
     auto [metadata, body] = split_metadata_block(normalize_newlines(markdown));
     std::vector<std::string> arguments = {"-f", "markdown-yaml_metadata_block", "-t", MarkdownWriter};
     for (auto& option : writer_options()) arguments.push_back(std::move(option));
     // The metadata block is kept verbatim; Pandoc would otherwise rewrite or drop it.
     auto formatted = run(arguments, body, "", std::nullopt, progress);
     if (metadata) formatted = trim(formatted).empty() ? *metadata + "\n" : *metadata + "\n\n" + std::string(trim_start(formatted));
-    return crlf ? replace_all(std::move(formatted), "\n", "\r\n") : formatted;
+    return to_native_eol(formatted);
 }
 
 void pandoc_export(std::string_view markdown, const std::string& target, const std::string& resource_directory, const Progress& progress) {

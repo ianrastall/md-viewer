@@ -1250,7 +1250,7 @@ std::string crawl(const std::string& start_url, const CrawlOptions& options, con
     const auto pages = crawler.run(*start);
     if (pages.empty()) throw Error("No content pages were found.");
     progress.report("Rendering " + std::to_string(pages.size()) + " pages");
-    return std::string(trim(render(pages)));
+    return to_native_eol(trim(render(pages)));
 }
 
 }  // namespace mdv

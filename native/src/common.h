@@ -59,6 +59,14 @@ std::string_view trim_start(std::string_view text);
 std::string_view trim_end(std::string_view text);
 std::string replace_all(std::string text, std::string_view from, std::string_view to);
 std::string normalize_newlines(std::string_view text);
+// The line ending of the platform md-viewer is built for (CRLF on Windows). Text md-viewer
+// produces (Format, imports, crawls) is normalized internally, then written out in this form.
+#ifdef _WIN32
+inline constexpr std::string_view NativeEol = "\r\n";
+#else
+inline constexpr std::string_view NativeEol = "\n";
+#endif
+std::string to_native_eol(std::string_view text);
 std::vector<std::string> split_lines(std::string_view text);  // on '\n' only
 std::string join_lines(const std::vector<std::string>& lines);
 std::string collapse_whitespace(std::string_view text);  // runs of whitespace (incl. NBSP) become one space; trimmed

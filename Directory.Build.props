@@ -4,5 +4,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <Deterministic>true</Deterministic>
+    <!-- The one version number: assemblies, installer, and package (packaging/AppxManifest.xml follows it). -->
+    <Version>2.1.0</Version>
   </PropertyGroup>
 </Project>

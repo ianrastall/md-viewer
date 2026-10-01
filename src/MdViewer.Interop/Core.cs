@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace MdViewer.Interop;
 
 public enum FileKind { Markdown, Pandoc, Pdf, Export }
@@ -7,7 +9,38 @@ public sealed record FileType(FileKind Kind, string Extension, string Label);
 /// <summary>A document opened by the C++ core: Markdown as is, or another format converted to Markdown.</summary>
 public sealed record OpenedDocument(bool IsMarkdown, string Encoding, string Summary, string Text);
 
-public sealed record FetchedPandoc(string Version, string Path);
+public sealed class ToolStatus
+{
+    public string Id { get; init; } = "";
+    public string Name { get; init; } = "";
+    public string Purpose { get; init; } = "";
+    public bool Installed { get; init; }
+    public string? Path { get; init; }
+    public string? Source { get; init; }
+    public string? Version { get; init; }
+    public string? Latest { get; init; }
+    public bool UpdateAvailable { get; init; }
+    public string? LatestError { get; init; }
+    public string Action { get; init; } = "none";
+    public string? ActionNote { get; init; }
+    public string? Note { get; init; }
+    public string[] Languages { get; init; } = [];
+}
+
+public sealed class OcrStatus
+{
+    public string Engine { get; init; } = "auto";
+    public string Languages { get; init; } = "eng";
+    public string Active { get; init; } = "windows";
+}
+
+public sealed class ToolsStatus
+{
+    public ToolStatus[] Tools { get; init; } = [];
+    public OcrStatus Ocr { get; init; } = new();
+    public bool CheckedLatest { get; init; }
+    public ToolStatus? this[string id] => Tools.FirstOrDefault(t => t.Id == id);
+}
 
 /// <summary>Thin async wrappers over the C++ core. Every operation runs natively; C# only marshals.</summary>
 public static unsafe class Core
@@ -49,11 +82,21 @@ public static unsafe class Core
         Native.WithText(markdown, (utf8, length) => Native.WithProgress(null, cancellation, (callback, context) =>
             Native.Text(Native.PandocExport((byte*)utf8, length, target, resourceDirectory, Native.Callback(callback), context))))));
 
-    public static Task<FetchedPandoc> FetchPandocAsync(IProgress<string>? progress, CancellationToken cancellation = default) => Native.RunAsync(() => Native.Call(() =>
+    /// <summary>OCR for scanned PDF pages: "auto", "windows", or "tesseract", and Tesseract languages such as "eng+deu".</summary>
+    public static void ConfigureOcr(string engine, string languages) => Native.Call(() => { Native.ConfigureOcr(engine, languages); return 0; });
+
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
+
+    /// <summary>Installed tools and, with <paramref name="checkLatest"/>, their newest official releases.</summary>
+    public static Task<ToolsStatus> ToolsStatusAsync(bool checkLatest, IProgress<string>? progress, CancellationToken cancellation = default) => Native.RunAsync(() => Native.Call(() =>
     {
-        var lines = Native.WithProgress(progress, cancellation, (callback, context) => Native.Text(Native.PandocFetch(Native.Callback(callback), context))).Split('\n', 2);
-        return new FetchedPandoc(lines[0], lines[1]);
+        var json = Native.WithProgress(progress, cancellation, (callback, context) => Native.Text(Native.ToolsStatus(checkLatest ? 1 : 0, Native.Callback(callback), context)));
+        return JsonSerializer.Deserialize<ToolsStatus>(json, JsonOptions) ?? throw new NativeCoreException("The C++ core returned no tool information.");
     }));
+
+    /// <summary>Installs or updates "pandoc" or "tesseract"; returns a status line.</summary>
+    public static Task<string> InstallToolAsync(string tool, IProgress<string>? progress, CancellationToken cancellation = default) => Native.RunAsync(() => Native.Call(() =>
+        Native.WithProgress(progress, cancellation, (callback, context) => Native.Text(Native.ToolInstall(tool, Native.Callback(callback), context)))));
 
     public static Task<string> CrawlAsync(string startUrl, int maxPages, IProgress<string>? progress, CancellationToken cancellation) => Native.RunAsync(() => Native.Call(() =>
         Native.WithProgress(progress, cancellation, (callback, context) => Native.Text(Native.Crawl(startUrl, maxPages, Native.Callback(callback), context)))));

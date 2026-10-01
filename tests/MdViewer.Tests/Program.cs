@@ -145,6 +145,24 @@ try
     }
     else Console.WriteLine("      pandoc not found; skipped Pandoc workflows");
 
+    // Tools: installed status without network, OCR preferences persisted, and the Tools command.
+    var tools = new ToolsViewModel(vm.Settings);
+    await tools.RefreshAsync(checkLatest: false);
+    Check("tools status", tools.Status == "" && tools.Pandoc.Name == "Pandoc" && tools.Tesseract.Name == "Tesseract OCR" && tools.WindowsOcr.Name == "Windows OCR" &&
+                          tools.Pandoc.LatestText == "Not checked for updates yet." && tools.Pandoc.HasAction && !tools.WindowsOcr.HasAction, tools.Status);
+    Check("pandoc card", tools.Pandoc.Installed == HasPandoc() && (tools.Pandoc.Installed ? tools.Pandoc.StatusText.StartsWith("Installed", StringComparison.Ordinal) : tools.Pandoc.NeedsAttention));
+    tools.EngineIndex = 1;
+    tools.TesseractLanguages = "eng deu";
+    var reloaded = ViewerSettings.Load(settingsPath);
+    Check("ocr preferences saved", reloaded is { OcrEngine: "windows", TesseractLanguages: "eng+deu" } && tools.ActiveEngineText == "Scanned pages are read with Windows OCR.");
+    tools.EngineIndex = 0;
+    tools.TesseractLanguages = "eng";
+    vm.OpenToolsCommand.Execute(null);
+    Check("tools command", dialogs.ToolsShown == 1);
+    vm.Settings.CheckToolsAutomatically = false;
+    await vm.CheckToolsInBackgroundAsync();
+    Check("background check can be turned off", vm.Settings.LastToolCheck is null && !vm.HasUpdateNotice);
+
     // A cancelled save prompt keeps the document open.
     await vm.OpenFileAsync(file);
     await vm.ReflowCommand.ExecuteAsync(null);
@@ -185,4 +203,6 @@ sealed class FakeDialogs : IViewerDialogs
     public Task<UnsavedChoice> ConfirmUnsavedAsync(string documentName) { UnsavedPrompts++; return Task.FromResult(Unsaved); }
     public Task ShowErrorAsync(string title, string message) { Errors.Add($"{title}: {message}"); return Task.CompletedTask; }
     public void CloseWindow() { }
+    public int ToolsShown { get; private set; }
+    public void ShowTools() => ToolsShown++;
 }

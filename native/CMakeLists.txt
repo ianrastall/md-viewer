@@ -28,8 +28,8 @@ endforeach()
 
 # The md-viewer core, compiled once and linked into both the DLL and the test program.
 add_library(mdv_core OBJECT
-  src/abi.cpp src/common.cpp src/crawl.cpp src/download.cpp src/files.cpp src/html.cpp
-  src/http.cpp src/markdown.cpp src/pandoc.cpp src/pdf.cpp src/subprocess.cpp src/url.cpp)
+  src/abi.cpp src/common.cpp src/crawl.cpp src/files.cpp src/html.cpp
+  src/http.cpp src/markdown.cpp src/pandoc.cpp src/pdf.cpp src/subprocess.cpp src/tools.cpp src/url.cpp)
 target_compile_features(mdv_core PUBLIC cxx_std_20)
 target_include_directories(mdv_core PUBLIC include src vendor "${PDFIUM_DIR}/include")
 target_link_libraries(mdv_core PUBLIC md4c gumbo miniz)
@@ -39,7 +39,7 @@ if(MSVC)
   target_compile_options(mdv_core PRIVATE /W4 /EHsc /utf-8 /permissive- /bigobj)
 endif()
 
-set(MDV_SYSTEM_LIBRARIES winhttp bcrypt windowsapp ole32 user32 "${PDFIUM_DIR}/lib/pdfium.dll.lib")
+set(MDV_SYSTEM_LIBRARIES winhttp bcrypt windowsapp ole32 user32 shell32 advapi32 "${PDFIUM_DIR}/lib/pdfium.dll.lib")
 
 add_library(mdv_native SHARED)
 target_link_libraries(mdv_native PRIVATE mdv_core ${MDV_SYSTEM_LIBRARIES})

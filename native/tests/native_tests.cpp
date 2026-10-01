@@ -7,6 +7,7 @@
 #include "files.h"
 #include "html.h"
 #include "pandoc.h"
+#include "tools.h"
 #include "url.h"
 
 #include <windows.h>
@@ -405,19 +406,49 @@ int main() {
         const auto pdf = scratch / "sample.pdf";
         write_all(pdf, minimal_pdf("Imported text from a small PDF document for md-viewer verification purposes only."));
         const auto opened = take(mdv_open(pdf.string().c_str(), nullptr, nullptr));
-        check("pdf import", opened.ok() && opened.data.starts_with("imported\nUTF-8\nImported sample.pdf.\n<!--\nPDF import: 1 page(s)") &&
+        check("pdf import", opened.ok() && opened.data.starts_with("imported\nUTF-8\nImported sample.pdf.\n<!--\r\nPDF import: 1 page(s)\r\n") &&
                                 opened.data.find("# sample") != std::string::npos && opened.data.find("md-viewer verification") != std::string::npos, opened.data);
         const auto cancelled = take(mdv_open(pdf.string().c_str(), cancel_immediately, nullptr));
         check("pdf cancel", cancelled.status == MDV_CANCELLED);
         const auto scanned = scratch / "scanned.pdf";
         write_all(scanned, scanned_pdf(L"Scanned pages need optical character recognition"));
-        const auto recognized = take(mdv_open(scanned.string().c_str(), nullptr, nullptr));
-        if (recognized.data.find("unavailable for the current user languages") != std::string::npos) std::cout << "      Windows OCR unavailable; skipped the OCR check\n";
-        else check("pdf ocr", recognized.ok() && recognized.data.starts_with("imported\nUTF-8\nImported scanned.pdf; OCR on 1 page(s).") &&
-                                  recognized.data.find("optical character recognition") != std::string::npos, recognized.data);
+        mdv_configure_ocr("windows", "eng");
+        auto recognized = take(mdv_open(scanned.string().c_str(), nullptr, nullptr));
+        if (recognized.data.find("unavailable for the current user languages") != std::string::npos) std::cout << "      Windows OCR unavailable; skipped the Windows OCR check\n";
+        else check("pdf windows ocr", recognized.ok() && recognized.data.starts_with("imported\nUTF-8\nImported scanned.pdf; OCR on 1 page(s) with Windows OCR.") &&
+                                          recognized.data.find("optical character recognition") != std::string::npos, recognized.data);
+        if (const auto tesseract = mdv::find_tesseract()) {
+            mdv_configure_ocr("tesseract", "eng+zzz");
+            recognized = take(mdv_open(scanned.string().c_str(), nullptr, nullptr));
+            check("pdf tesseract ocr", recognized.ok() && recognized.data.starts_with("imported\nUTF-8\nImported scanned.pdf; OCR on 1 page(s) with Tesseract (eng); 1 warning(s).") &&
+                                           recognized.data.find("optical character recognition") != std::string::npos &&
+                                           recognized.data.find("Tesseract language data is not installed for: zzz.") != std::string::npos, recognized.data);
+            mdv_configure_ocr("auto", "eng");
+            recognized = take(mdv_open(scanned.string().c_str(), nullptr, nullptr));
+            check("auto ocr prefers tesseract", recognized.data.find("with Tesseract (eng).") != std::string::npos, recognized.data.substr(0, 200));
+            std::cout << "      tesseract: " << *tesseract << "\n";
+        } else {
+            std::cout << "      tesseract not found; skipped the Tesseract checks\n";
+        }
+        mdv_configure_ocr("auto", "eng");
         const auto broken = scratch / "broken.pdf";
         write_all(broken, "not a pdf");
         check("broken pdf", take(mdv_open(broken.string().c_str(), nullptr, nullptr)).data == "The file is not a readable PDF.");
+    }
+
+    // ---- Tools ------------------------------------------------------------------------
+    {
+        check("version order", mdv::compare_versions("5.5.3.20260724", "5.5.0.20241111") > 0 && mdv::compare_versions("3.8", "3.8.0") == 0 &&
+                                   mdv::compare_versions("3.9", "3.10") < 0);
+        const auto status = take(mdv_tools_status(0, nullptr, nullptr));
+        check("tools status", status.ok() && status.data.find("\"id\":\"pandoc\"") != std::string::npos && status.data.find("\"id\":\"tesseract\"") != std::string::npos &&
+                                  status.data.find("\"id\":\"windows-ocr\"") != std::string::npos && status.data.find("\"checked_latest\":false") != std::string::npos, status.data);
+        check("unknown tool", take(mdv_tool_install("photoshop", nullptr, nullptr)).data == "md-viewer cannot install photoshop.");
+        if (mdv::environment("MDV_NETWORK_TESTS") == "1") {
+            const auto latest = take(mdv_tools_status(1, nullptr, nullptr));
+            check("tools latest", latest.ok() && latest.data.find("\"latest\":") != std::string::npos && latest.data.find("latest_error") == std::string::npos, latest.data);
+            std::cout << "      " << latest.data.substr(0, 400) << "\n";
+        }
     }
 
     // ---- Crawler pieces -------------------------------------------------------------
@@ -474,11 +505,12 @@ int main() {
     if (mdv::find_pandoc()) {
         const auto markdown = "---\ntitle: T\n---\nSetext\n======\n\n| a | b |\n|---|---|\n| 1 | 2 |\n"s;
         const auto formatted = take(mdv_pandoc_format(markdown.data(), markdown.size(), nullptr, nullptr));
-        check("pandoc format", formatted.ok() && formatted.data.starts_with("---\ntitle: T\n---\n\n# Setext") && formatted.data.find("| a") != std::string::npos, formatted.data);
+        check("pandoc format", formatted.ok() && formatted.data.starts_with("---\r\ntitle: T\r\n---\r\n\r\n# Setext") && formatted.data.find("| a") != std::string::npos, formatted.data);
         auto format = [](const std::string& text) { return take(mdv_pandoc_format(text.data(), text.size(), nullptr, nullptr)).data; };
-        check("format keeps LF", format("# T\n\nOne\ntwo.\n\nThree.\n") == "# T\n\nOne two.\n\nThree.\n", format("# T\n\nOne\ntwo.\n\nThree.\n"));
+        // Produced text uses the platform's line endings (CRLF on Windows), whatever came in.
+        check("format writes platform line endings", format("# T\n\nOne\ntwo.\n\nThree.\n") == "# T\r\n\r\nOne two.\r\n\r\nThree.\r\n", format("# T\n\nOne\ntwo.\n\nThree.\n"));
         check("format keeps CRLF", format("# T\r\n\r\nOne.\r\n\r\nTwo.\r\n") == "# T\r\n\r\nOne.\r\n\r\nTwo.\r\n");
-        check("format keeps paragraphs with CR-only endings", format("# T\r\rOne.\r\rTwo.\r") == "# T\n\nOne.\n\nTwo.\n", format("# T\r\rOne.\r\rTwo.\r"));
+        check("format keeps paragraphs with CR-only endings", format("# T\r\rOne.\r\rTwo.\r") == "# T\r\n\r\nOne.\r\n\r\nTwo.\r\n", format("# T\r\rOne.\r\rTwo.\r"));
         check("format keeps paragraphs with CR CR LF endings", format("# T\r\r\nOne.\r\r\nTwo.\r\r\n") == "# T\r\n\r\nOne.\r\n\r\nTwo.\r\n", format("# T\r\r\nOne.\r\r\nTwo.\r\r\n"));
         check("format keeps CRLF front matter", format("---\r\ntitle: T\r\n---\r\nBody\r\n") == "---\r\ntitle: T\r\n---\r\n\r\nBody\r\n", format("---\r\ntitle: T\r\n---\r\nBody\r\n"));
         const auto html = scratch / "page.html";

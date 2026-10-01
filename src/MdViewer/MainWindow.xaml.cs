@@ -25,6 +25,8 @@ public sealed partial class MainWindow : Window, IViewerDialogs
         InitializeComponent();
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         ViewModel = new MainViewModel(this);
+        try { Core.ConfigureOcr(ViewModel.Settings.OcrEngine, ViewModel.Settings.TesseractLanguages); }
+        catch (NativeCoreException ex) { AppLog.Write("OCR settings", ex); }
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
         var titleBar = AppWindow.TitleBar;
@@ -74,6 +76,7 @@ public sealed partial class MainWindow : Window, IViewerDialogs
     {
         await ViewModel.ShowWelcomeAsync();
         if (path is not null) await ViewModel.OpenFileAsync(path);
+        await ViewModel.CheckToolsInBackgroundAsync();
     }
 
     private void AddShortcut(VirtualKey key, VirtualKeyModifiers modifiers, Action action)
@@ -214,12 +217,28 @@ public sealed partial class MainWindow : Window, IViewerDialogs
         try
         {
             if (ViewModel.IsBusy) ViewModel.CancelOperationCommand.Execute(null);
+            tools?.Close();
             if (await ViewModel.CanLeaveAsync()) { allowClose = true; Close(); }
         }
         finally { closing = false; }
     }
 
+    private void UpdateBar_Close(InfoBar sender, object args) => ViewModel.DismissUpdateNotice();
+
     // ---- IViewerDialogs ----------------------------------------------------
+
+    private ToolsWindow? tools;
+
+    public void ShowTools()
+    {
+        ViewModel.DismissUpdateNotice();
+        if (tools is null)
+        {
+            tools = new ToolsWindow(new ToolsViewModel(ViewModel.Settings));
+            tools.Closed += (_, _) => tools = null;
+        }
+        tools.Activate();
+    }
 
     // Window.Close() does not raise AppWindow.Closing, so ask about unsaved work here.
     public async void CloseWindow()
