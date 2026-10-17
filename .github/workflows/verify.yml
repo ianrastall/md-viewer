@@ -1,0 +1,79 @@
+name: Windows verification
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      build_release:
+        description: Build the unsigned Windows release installer after verification
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-verification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      MDV_NETWORK_TESTS: '0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install pinned Pandoc for conversion checks
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = Join-Path $env:RUNNER_TEMP 'pandoc.zip'
+          Invoke-WebRequest 'https://github.com/jgm/pandoc/releases/download/3.12.1/pandoc-3.12.1-windows-x86_64.zip' -OutFile $archive
+          $expected = '6ef431cb20b2c24a0371fc19200dc49d452be54b1b5c9239f3462841ef53e587'
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'Pandoc checksum mismatch.' }
+          $destination = Join-Path $env:RUNNER_TEMP 'pandoc'
+          Expand-Archive -LiteralPath $archive -DestinationPath $destination
+          $pandoc = Get-ChildItem -LiteralPath $destination -Recurse -Filter pandoc.exe | Select-Object -First 1
+          if (-not $pandoc) { throw 'The Pandoc archive has no executable.' }
+          $pandoc.DirectoryName | Out-File -LiteralPath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Build and run native and view-model checks
+        run: |
+          New-Item -ItemType Directory -Force artifacts | Out-Null
+          & ./scripts/build.ps1 -Test *>&1 | Tee-Object -FilePath artifacts/verification.log
+
+      - name: Build release installer
+        if: ${{ inputs.build_release }}
+        run: ./scripts/release.ps1 -SkipTests -Unsigned
+
+      - name: Upload verification log
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-verification-log
+          path: artifacts/verification.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload release installer bundle
+        if: ${{ inputs.build_release && success() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: md-viewer-windows-x64
+          path: artifacts/release/md-viewer-*-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 14
