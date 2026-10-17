@@ -216,9 +216,7 @@ public sealed partial class MainWindow : Window, IViewerDialogs
         closing = true;
         try
         {
-            if (ViewModel.IsBusy) ViewModel.CancelOperationCommand.Execute(null);
-            tools?.Close();
-            if (await ViewModel.CanLeaveAsync()) { allowClose = true; Close(); }
+            if (await ViewModel.CanLeaveAsync()) { tools?.Close(); allowClose = true; Close(); }
         }
         finally { closing = false; }
     }
@@ -245,7 +243,7 @@ public sealed partial class MainWindow : Window, IViewerDialogs
     {
         if (closing) return;
         closing = true;
-        try { if (await ViewModel.CanLeaveAsync()) { allowClose = true; Close(); } }
+        try { if (await ViewModel.CanLeaveAsync()) { tools?.Close(); allowClose = true; Close(); } }
         finally { closing = false; }
     }
 

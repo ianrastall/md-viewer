@@ -174,6 +174,55 @@ try
     await vm.CloseDocumentCommand.ExecuteAsync(null);
     Check("save prompt writes in place", vm.Origin == DocumentOrigin.Welcome && File.ReadAllText(file) == "# A\n\n## B\n");
     Check("no stray errors", dialogs.Errors.Count == 3, string.Join(" | ", dialogs.Errors));
+
+    // Hold a real Save As workflow at its picker: other document commands must
+    // not change the source that will be saved, and closing must wait for it.
+    var gatedDialogs = new FakeDialogs();
+    var gated = new MainViewModel(gatedDialogs, ViewerSettings.Load(Path.Combine(scratch.FullName, "gated-settings.json")));
+    await gated.OpenFileAsync(file);
+    await File.WriteAllTextAsync(file, "# Start\n\n### Child\n");
+    await gated.OpenFileAsync(file);
+    await gated.ReflowCommand.ExecuteAsync(null);
+    var pendingSave = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+    gatedDialogs.PendingSave = pendingSave.Task;
+    var saving = gated.SaveAsCommand.ExecuteAsync(null);
+    Check("picker holds busy state", gated.IsBusy && !gated.IsIdle && !gated.CanUndo && !gated.UndoCommand.CanExecute(null));
+    var textBefore = gated.MarkdownText;
+    await gated.OpenFileAsync(other);
+    await gated.CloseDocumentCommand.ExecuteAsync(null);
+    await gated.UndoCommand.ExecuteAsync(null);
+    Check("document commands cannot overlap a picker", gated.MarkdownText == textBefore && gated.FilePath == file && gatedDialogs.UnsavedPrompts == 0);
+    var leaving = gated.CanLeaveAsync();
+    Check("window close waits for pending save", !leaving.IsCompleted && gatedDialogs.UnsavedPrompts == 0);
+    var gatedCopy = Path.Combine(scratch.FullName, "gated-copy.md");
+    pendingSave.SetResult(gatedCopy);
+    await saving;
+    Check("close after save sees saved state", await leaving && !gated.IsBusy && !gated.IsDirty && gated.FilePath == gatedCopy && File.ReadAllText(gatedCopy) == textBefore && gatedDialogs.UnsavedPrompts == 0);
+    Check("history commands reenabled after save", gated.CanUndo && gated.UndoCommand.CanExecute(null));
+
+    // Cancelled Save As leaves the dirty document intact; closing asks afterwards.
+    await gated.UndoCommand.ExecuteAsync(null);
+    pendingSave = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+    gatedDialogs.PendingSave = pendingSave.Task;
+    saving = gated.SaveAsCommand.ExecuteAsync(null);
+    leaving = gated.CanLeaveAsync();
+    pendingSave.SetResult(null);
+    await saving;
+    Check("cancelled picker still checks unsaved work", !await leaving && gated.IsDirty && !gated.IsBusy && gatedDialogs.UnsavedPrompts == 1);
+
+    // Errors from pickers and path normalization are handled like native errors.
+    gatedDialogs.Unsaved = UnsavedChoice.Discard;
+    await gated.OpenFileAsync("\0");
+    Check("invalid open path is handled", gatedDialogs.Errors.Count == 1 && !gated.IsBusy && gated.FilePath == gatedCopy);
+    gatedDialogs.PendingSave = Task.FromException<string?>(new IOException("Picker unavailable"));
+    await gated.SaveAsCommand.ExecuteAsync(null);
+    Check("picker error releases operation", gatedDialogs.Errors.Count == 2 && gatedDialogs.Errors[^1].Contains("Picker unavailable") && !gated.IsBusy && gated.IsDirty);
+
+    // A failed save during close must never authorize discarding the document.
+    gatedDialogs.Unsaved = UnsavedChoice.Save;
+    using (var locked = new FileStream(gatedCopy, FileMode.Open, FileAccess.Read, FileShare.None))
+        Check("failed save keeps window open", !await gated.CanLeaveAsync() && gated.IsDirty && !gated.IsBusy && gatedDialogs.Errors.Count == 3);
+    Check("failed save leaves original intact", File.ReadAllText(gatedCopy) == textBefore && !Directory.EnumerateFiles(scratch.FullName, ".*.tmp").Any());
 }
 finally { scratch.Delete(recursive: true); }
 
@@ -194,10 +243,11 @@ sealed class FakeDialogs : IViewerDialogs
     public string? Url { get; set; }
     public int UnsavedPrompts { get; private set; }
     public int SavePrompts { get; private set; }
+    public Task<string?>? PendingSave { get; set; }
     public List<string> Errors { get; } = [];
 
     public Task<string?> PickOpenPathAsync() => Task.FromResult<string?>(null);
-    public Task<string?> PickSavePathAsync(string suggestedName) { SavePrompts++; return Task.FromResult(SavePath); }
+    public Task<string?> PickSavePathAsync(string suggestedName) { SavePrompts++; return PendingSave ?? Task.FromResult(SavePath); }
     public Task<string?> PickExportPathAsync(string suggestedName) => Task.FromResult(ExportPath);
     public Task<string?> PromptUrlAsync() => Task.FromResult(Url);
     public Task<UnsavedChoice> ConfirmUnsavedAsync(string documentName) { UnsavedPrompts++; return Task.FromResult(Unsaved); }

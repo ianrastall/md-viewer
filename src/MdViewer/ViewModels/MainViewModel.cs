@@ -17,6 +17,7 @@ public partial class MainViewModel : ObservableObject
     private const int UndoLimit = 100;
     private readonly List<string> undoHistory = [], redoHistory = [];
     private CancellationTokenSource? operation;
+    private TaskCompletionSource? idleCompletion;
     private string? savedText;
     private int renderGeneration;
 
@@ -75,8 +76,8 @@ public partial class MainViewModel : ObservableObject
         set { settings.OutlineWidth = value; settings.Save(); }
     }
     public bool IsIdle => !IsBusy;
-    public bool CanUndo => undoHistory.Count > 0;
-    public bool CanRedo => redoHistory.Count > 0;
+    public bool CanUndo => !IsBusy && undoHistory.Count > 0;
+    public bool CanRedo => !IsBusy && redoHistory.Count > 0;
     /// <summary>Relative links and images resolve against the document's folder.</summary>
     public string? BaseDirectory => Path.GetDirectoryName(FilePath ?? SourcePath) is { Length: > 0 } directory ? directory : null;
 
@@ -87,7 +88,11 @@ public partial class MainViewModel : ObservableObject
     partial void OnIsDirtyChanged(bool value) => NotifyTitle();
     partial void OnEncodingLabelChanged(string value) => OnPropertyChanged(nameof(StatisticsText));
     partial void OnIsRawViewChanged(bool value) => OnPropertyChanged(nameof(IsRichView));
-    partial void OnIsBusyChanged(bool value) => OnPropertyChanged(nameof(IsIdle));
+    partial void OnIsBusyChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsIdle));
+        NotifyHistory();
+    }
     partial void OnUpdateNoticeChanged(string value) => OnPropertyChanged(nameof(HasUpdateNotice));
     partial void OnDocumentChanged(MarkdownDocument? value)
     {
@@ -121,85 +126,72 @@ public partial class MainViewModel : ObservableObject
     public Task ShowWelcomeAsync() => LoadAsync(WelcomeText, DocumentOrigin.Welcome, null, null, WelcomeText, "UTF-8");
 
     /// <summary>Opens Markdown directly; the C++ core converts Word, HTML, EPUB, ODT, RTF, and PDF to Markdown.</summary>
-    public async Task OpenFileAsync(string path)
+    public Task OpenFileAsync(string path) => RunAsync("Open", () => OpenFileCoreAsync(path));
+
+    private async Task OpenFileCoreAsync(string path)
     {
-        if (IsBusy) return;
-        if (!await CanLeaveAsync()) return;
+        if (!await CanLeaveCoreAsync()) return;
         var full = Path.GetFullPath(path);
         using var cancellation = new CancellationTokenSource();
         operation = cancellation;
         IsImporting = Core.KindOf(full) is FileKind.Pandoc or FileKind.Pdf;
         try
         {
-            await RunAsync("Open", async () =>
-            {
-                var opened = await Core.OpenAsync(full, new Progress<string>(s => Status = s), cancellation.Token);
-                if (opened.IsMarkdown) await LoadAsync(opened.Text, DocumentOrigin.Markdown, full, full, opened.Text, opened.Encoding);
-                else await LoadAsync(opened.Text, DocumentOrigin.Imported, null, full, null, opened.Encoding);
-                Status = opened.Summary;
-                settings.LastFolder = Path.GetDirectoryName(full);
-                settings.Save();
-            });
+            var opened = await Core.OpenAsync(full, new Progress<string>(s => Status = s), cancellation.Token);
+            if (opened.IsMarkdown) await LoadAsync(opened.Text, DocumentOrigin.Markdown, full, full, opened.Text, opened.Encoding);
+            else await LoadAsync(opened.Text, DocumentOrigin.Imported, null, full, null, opened.Encoding);
+            Status = opened.Summary;
+            settings.LastFolder = Path.GetDirectoryName(full);
+            settings.Save();
         }
         finally { IsImporting = false; operation = null; }
     }
 
     [RelayCommand]
-    private async Task OpenAsync()
+    private Task OpenAsync() => RunAsync("Open", async () =>
     {
-        if (IsBusy) return;
         var path = await dialogs.PickOpenPathAsync();
-        if (path is not null) await OpenFileAsync(path);
-    }
+        if (path is not null) await OpenFileCoreAsync(path);
+    });
 
     [RelayCommand]
-    private async Task SaveAsync() => await SaveCoreAsync(saveAs: false);
+    private Task SaveAsync() => RunAsync("Save", () => SaveCoreAsync(saveAs: false));
 
     [RelayCommand]
-    private async Task SaveAsAsync() => await SaveCoreAsync(saveAs: true);
+    private Task SaveAsAsync() => RunAsync("Save", () => SaveCoreAsync(saveAs: true));
 
     private async Task<bool> SaveCoreAsync(bool saveAs)
     {
-        if (IsBusy) return false;
         var path = !saveAs && Origin == DocumentOrigin.Markdown ? FilePath : null;
         path ??= await dialogs.PickSavePathAsync(SuggestedName);
         if (path is null) return false;
-        var saved = false;
-        await RunAsync("Save", async () =>
-        {
-            // Markdown files keep their encoding; converted documents are saved as UTF-8.
-            EncodingLabel = await Core.SaveAsync(path, MarkdownText, Origin == DocumentOrigin.Markdown ? EncodingLabel : "UTF-8");
-            savedText = MarkdownText;
-            Origin = DocumentOrigin.Markdown;
-            FilePath = SourcePath = Path.GetFullPath(path);
-            UpdateDirty();
-            Status = $"Saved {Path.GetFileName(path)}.";
-            saved = true;
-        });
-        return saved;
+        // Markdown files keep their encoding; converted documents are saved as UTF-8.
+        EncodingLabel = await Core.SaveAsync(path, MarkdownText, Origin == DocumentOrigin.Markdown ? EncodingLabel : "UTF-8");
+        savedText = MarkdownText;
+        Origin = DocumentOrigin.Markdown;
+        FilePath = SourcePath = Path.GetFullPath(path);
+        UpdateDirty();
+        Status = $"Saved {Path.GetFileName(path)}.";
+        return true;
     }
 
     [RelayCommand]
-    private async Task CloseDocumentAsync()
+    private Task CloseDocumentAsync() => RunAsync("Close", async () =>
     {
-        if (IsBusy || !await CanLeaveAsync()) return;
+        if (!await CanLeaveCoreAsync()) return;
         await ShowWelcomeAsync();
         Status = "Closed the document.";
-    }
+    });
 
     [RelayCommand]
-    private async Task ExportAsync()
+    private Task ExportAsync() => RunAsync("Export", async () =>
     {
-        if (IsBusy) return;
         var path = await dialogs.PickExportPathAsync(SuggestedName);
         if (path is null) return;
-        await RunAsync("Export", async () =>
-        {
-            Status = $"Exporting {Path.GetFileName(path)} with Pandoc...";
-            await Core.ExportAsync(MarkdownText, path, BaseDirectory);
-            Status = $"Exported {Path.GetFileName(path)}.";
-        });
-    }
+        Status = $"Exporting {Path.GetFileName(path)} with Pandoc...";
+        await Core.ExportAsync(MarkdownText, path, BaseDirectory);
+        Status = $"Exported {Path.GetFileName(path)}.";
+    });
 
     [RelayCommand]
     private async Task FormatAsync()
@@ -228,9 +220,9 @@ public partial class MainViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task CrawlAsync()
+    private Task CrawlAsync() => RunAsync("Crawl", async () =>
     {
-        if (IsBusy || !await CanLeaveAsync()) return;
+        if (!await CanLeaveCoreAsync()) return;
         var text = (await dialogs.PromptUrlAsync())?.Trim();
         if (string.IsNullOrEmpty(text)) return;
         if (!Uri.TryCreate(text, UriKind.Absolute, out var start) || start.Scheme is not ("http" or "https") || text.Any(char.IsWhiteSpace))
@@ -244,36 +236,29 @@ public partial class MainViewModel : ObservableObject
         CrawlStatus = $"Starting {start}";
         try
         {
-            await RunAsync("Crawl", async () =>
-            {
-                try
-                {
-                    var markdown = await Core.CrawlAsync(start.AbsoluteUri, MaxCrawlPages, new Progress<string>(s => CrawlStatus = s), cancellation.Token);
-                    await LoadAsync(markdown, DocumentOrigin.Crawled, null, null, null, "UTF-8");
-                    Status = $"Crawled {start.Host}. Save to keep the Markdown.";
-                }
-                catch (OperationCanceledException) { Status = "Crawl cancelled."; }
-            });
+            var markdown = await Core.CrawlAsync(start.AbsoluteUri, MaxCrawlPages, new Progress<string>(s => CrawlStatus = s), cancellation.Token);
+            await LoadAsync(markdown, DocumentOrigin.Crawled, null, null, null, "UTF-8");
+            Status = $"Crawled {start.Host}. Save to keep the Markdown.";
         }
         finally { IsCrawling = false; operation = null; }
-    }
+    });
 
     /// <summary>Steps back through changes made by Format and Reflow. Saving does not clear the history.</summary>
     [RelayCommand(CanExecute = nameof(CanUndo))]
-    private async Task UndoAsync()
+    private Task UndoAsync() => RunAsync("Undo", async () =>
     {
-        if (IsBusy || undoHistory.Count == 0) return;
+        if (undoHistory.Count == 0) return;
         redoHistory.Add(MarkdownText);
         await RestoreAsync(Pop(undoHistory), "Undid the last change.");
-    }
+    });
 
     [RelayCommand(CanExecute = nameof(CanRedo))]
-    private async Task RedoAsync()
+    private Task RedoAsync() => RunAsync("Redo", async () =>
     {
-        if (IsBusy || redoHistory.Count == 0) return;
+        if (redoHistory.Count == 0) return;
         undoHistory.Add(MarkdownText);
         await RestoreAsync(Pop(redoHistory), "Redid the change.");
-    }
+    });
 
     private static string Pop(List<string> history)
     {
@@ -331,6 +316,20 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>Asks about unsaved work. Returns false when the user cancels or a save fails.</summary>
     public async Task<bool> CanLeaveAsync()
+    {
+        // A native worker is a background thread: closing its window must not terminate
+        // an in-flight save or ask about an import before its result has been loaded.
+        while (IsBusy && idleCompletion is { } completion)
+        {
+            operation?.Cancel();
+            await completion.Task;
+        }
+        var canLeave = false;
+        await RunAsync("Close", async () => canLeave = await CanLeaveCoreAsync());
+        return canLeave;
+    }
+
+    private async Task<bool> CanLeaveCoreAsync()
     {
         if (!IsDirty) return true;
         return await dialogs.ConfirmUnsavedAsync(DocumentTitle) switch
@@ -392,6 +391,9 @@ public partial class MainViewModel : ObservableObject
 
     private async Task RunAsync(string action, Func<Task> work)
     {
+        if (IsBusy) return;
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        idleCompletion = completion;
         IsBusy = true;
         try { await work(); }
         catch (OperationCanceledException) { Status = $"{action} cancelled."; }
@@ -401,7 +403,11 @@ public partial class MainViewModel : ObservableObject
             Status = $"{action} failed.";
             await dialogs.ShowErrorAsync($"{action} failed", ex.Message);
         }
-        finally { IsBusy = false; }
+        finally
+        {
+            IsBusy = false;
+            completion.TrySetResult();
+        }
     }
 
     public const string WelcomeText = """

@@ -93,6 +93,8 @@ A self-signed certificate only satisfies machines that trust it, so it does not 
 
 ## Project layout
 
+See [Development status](docs/DEVELOPMENT.md) for architecture details, milestone verification, and the remaining development work.
+
 | Path | Responsibility |
 | --- | --- |
 | `native/include/mdv_native.h` | The C ABI between the C# frame and the C++ program |

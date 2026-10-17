@@ -24,7 +24,19 @@ try {
     if (-not $installation) { throw 'The Visual C++ x64 build tools are required.' }
     $generator = if ([version]$installation.installationVersion -ge [version]'18.0') { 'Visual Studio 18 2026' } else { 'Visual Studio 17 2022' }
     if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) { throw 'CMake is required on PATH (4.2+ for Visual Studio 2026).' }
-    & cmake -S native -B build/native -G $generator -A x64 "-DCMAKE_GENERATOR_INSTANCE=$($installation.installationPath)"
+    # A checkout may already contain a cache from a different Visual Studio installation.
+    $configureArguments = @('-S', 'native', '-B', 'build/native', '-G', $generator, '-A', 'x64', "-DCMAKE_GENERATOR_INSTANCE=$($installation.installationPath)")
+    $cachePath = Join-Path $root 'build\native\CMakeCache.txt'
+    if (Test-Path -LiteralPath $cachePath) {
+        $cache = Get-Content -LiteralPath $cachePath
+        $cachedGenerator = ($cache | Select-String '^CMAKE_GENERATOR:INTERNAL=(.*)$').Matches.Groups[1].Value
+        $cachedInstance = ($cache | Select-String '^CMAKE_GENERATOR_INSTANCE:[^=]+=(.*)$').Matches.Groups[1].Value
+        if ($cachedGenerator -ne $generator -or $cachedInstance -ne $installation.installationPath) {
+            Write-Host 'Refreshing the CMake cache for the current Visual Studio installation...'
+            $configureArguments += '--fresh'
+        }
+    }
+    & cmake @configureArguments
     if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed.' }
     & cmake --build build/native --config Release
     if ($LASTEXITCODE -ne 0) { throw 'Native build failed.' }
