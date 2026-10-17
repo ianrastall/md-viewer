@@ -114,6 +114,8 @@ The view model still owns grouping, busy state, dirty tracking, and parsing. The
 
 ### Verification and remaining work
 
-The view-model harness passes 89 checks, including 14 additional history checks using tiny configurable budgets. These exercise count and payload bounds, eviction in both directions, counter correctness, oversized snapshots, branch invalidation, clearing, and repeated transfers, without allocating huge test documents. The full WinUI build passed with zero warnings and errors. The release pipeline must also pass before publishing 2.2.1.
+The view-model harness passes 89 checks, including 14 additional history checks using tiny configurable budgets. These exercise count and payload bounds, eviction in both directions, counter correctness, oversized snapshots, branch invalidation, clearing, and repeated transfers, without allocating huge test documents. The full WinUI build passed with zero warnings and errors. The complete local release pipeline passed 90 native and 89 view-model/history checks; [hosted CI](https://github.com/ianrastall/md-viewer/actions/runs/39056147286) passed 88 and 89 respectively, with Tesseract absent from the hosted image.
+
+[2.2.1](https://github.com/ianrastall/md-viewer/releases/tag/v2.2.1) is published from `ca60f53`, matching the binary's embedded revision. The ZIP contains the verified standalone installer, installation notes, and license notices. Its installer and ZIP hashes match GitHub's uploaded asset digests. The release is unsigned, as documented in its notes. Both main's source and the checked-in package version are current in `D:\dev\proj\md-viewer`.
 
 History still stores full strings rather than deltas. Older steps can therefore disappear before the 100-step maximum for large documents. Search, unsaved-draft recovery, external-file-change detection, and more precise caret/scroll restoration remain future work.
