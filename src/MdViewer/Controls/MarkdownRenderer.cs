@@ -1,5 +1,5 @@
-using System.Text.RegularExpressions;
 using MdViewer.Interop.Markdown;
+using MdViewer.Services;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -11,7 +11,8 @@ using Windows.UI.Text;
 namespace MdViewer.Controls;
 
 /// <summary>Builds native WinUI elements for the C++ core's document model. No browser or WebView is involved.</summary>
-internal sealed partial class MarkdownRenderer(double zoom, string? baseDirectory, Action<string> linkInvoked)
+internal sealed class MarkdownRenderer(double zoom, string? baseDirectory, Action<string> linkInvoked,
+    SearchPresentation? search = null, MarkdownBlock? activeBlock = null)
 {
     private static readonly FontFamily BodyFont = new("Segoe UI Variable Text, Segoe UI");
     private static readonly FontFamily DisplayFont = new("Segoe UI Variable Display, Segoe UI");
@@ -20,8 +21,12 @@ internal sealed partial class MarkdownRenderer(double zoom, string? baseDirector
     private static readonly double[] HeadingSizes = [30, 24, 20, 17.5, 16, 15];
     private static readonly string[] Bullets = ["•", "◦", "▪"];
 
-    [GeneratedRegex(@"^<br\s*/?>$", RegexOptions.IgnoreCase)]
-    private static partial Regex LineBreakTag();
+    private MarkdownBlock? currentBlock;
+    private int textIndex, inlineOffset;
+    private HashSet<MarkdownInline>? imageObjects;
+    private readonly List<(Run Run, int Start)> runPositions = [];
+    public FrameworkElement? ActiveSearchElement { get; private set; }
+    public TextPointer? ActiveSearchPointer { get; private set; }
 
     private double S(double size) => Math.Round(size * zoom, 1);
     private double BodySize => S(15);
@@ -30,6 +35,9 @@ internal sealed partial class MarkdownRenderer(double zoom, string? baseDirector
     /// <summary>A top-level block with the vertical rhythm of the page.</summary>
     public FrameworkElement Build(MarkdownBlock block, bool first)
     {
+        currentBlock = block;
+        textIndex = 0;
+        if (ReferenceEquals(block, activeBlock)) { ActiveSearchElement = null; ActiveSearchPointer = null; }
         var element = Block(block, 0, quiet: false);
         if (element.Visibility == Visibility.Collapsed) return element;
         element.Margin = block.Kind == BlockKind.Heading
@@ -74,15 +82,15 @@ internal sealed partial class MarkdownRenderer(double zoom, string? baseDirector
     {
         // A paragraph holding only an image (the usual screenshot or figure) becomes a block-level
         // image, so it can use the column's full width.
-        var visible = block.Inlines.Where(i => i.Kind != InlineKind.SoftBreak && !(i.Kind == InlineKind.Text && string.IsNullOrWhiteSpace(i.Text))).ToList();
-        if (visible is [{ Kind: InlineKind.Image } image] && ImageElement(image, inline: false) is { } picture) return picture;
-        return Text(block.Inlines, BodySize, 1.6, quiet ? Brush("MutedBrush") : Brush("TextBrush"));
+        var standalone = MarkdownDisplay.IsStandaloneImage(block);
+        if (standalone && ImageElement(block.Inlines.First(i => i.Kind == InlineKind.Image), inline: false) is { } picture) return picture;
+        return Text(block.Inlines, BodySize, 1.6, quiet ? Brush("MutedBrush") : Brush("TextBrush"), searchable: !standalone);
     }
 
     private FrameworkElement Heading(MarkdownBlock block)
     {
         var level = Math.Clamp(block.Level, 1, 6);
-        var text = Text(StripAttributeBlock(block.Inlines), S(HeadingSizes[level - 1]), 1.3, level == 6 ? Brush("MutedBrush") : Brush("TextBrush"), DisplayFont);
+        var text = Text(MarkdownDisplay.HeadingInlines(block.Inlines), S(HeadingSizes[level - 1]), 1.3, level == 6 ? Brush("MutedBrush") : Brush("TextBrush"), DisplayFont);
         text.FontWeight = level == 1 ? FontWeights.Bold : FontWeights.SemiBold;
         if (level > 2) return text;
         var panel = new StackPanel { Spacing = S(8) };
@@ -93,6 +101,21 @@ internal sealed partial class MarkdownRenderer(double zoom, string? baseDirector
 
     private FrameworkElement CodeBlock(string code, string label, bool quiet)
     {
+        var literal = code.TrimEnd('\n', '\r');
+        var codeRun = new Run { Text = literal };
+        var codeText = new TextBlock
+        {
+            FontFamily = MonoFont, FontSize = S(13.5), LineHeight = S(20), IsTextSelectionEnabled = true,
+            Foreground = quiet ? Brush("MutedBrush") : Brush("CodeTextBrush"), Padding = new Thickness(0, 0, 0, S(4))
+        };
+        codeText.Inlines.Add(codeRun);
+        var index = textIndex++;
+        Highlight(codeText.TextHighlighters, literal, index);
+        if (ActiveMatch(index) is { } match)
+        {
+            ActiveSearchElement = codeText;
+            ActiveSearchPointer = codeRun.ContentStart.GetPositionAtOffset(match.Start, LogicalDirection.Forward);
+        }
         var panel = new StackPanel { Spacing = S(6) };
         if (label.Length > 0)
             panel.Children.Add(new TextBlock { Text = label.ToUpperInvariant(), FontSize = S(10.5), CharacterSpacing = 80, Foreground = Brush("QuietBrush") });
@@ -102,16 +125,7 @@ internal sealed partial class MarkdownRenderer(double zoom, string? baseDirector
             VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
             HorizontalScrollMode = ScrollMode.Auto,
             VerticalScrollMode = ScrollMode.Disabled,
-            Content = new TextBlock
-            {
-                Text = code.TrimEnd('\n', '\r'),
-                FontFamily = MonoFont,
-                FontSize = S(13.5),
-                LineHeight = S(20),
-                IsTextSelectionEnabled = true,
-                Foreground = quiet ? Brush("MutedBrush") : Brush("CodeTextBrush"),
-                Padding = new Thickness(0, 0, 0, S(4))
-            }
+            Content = codeText
         });
         return new Border
         {
@@ -197,10 +211,14 @@ internal sealed partial class MarkdownRenderer(double zoom, string? baseDirector
         };
     }
 
-    private RichTextBlock Text(IEnumerable<MarkdownInline> inlines, double size, double lineSpacing, Brush foreground, FontFamily? font = null)
+    private RichTextBlock Text(IEnumerable<MarkdownInline> inlines, double size, double lineSpacing, Brush foreground, FontFamily? font = null, bool searchable = true)
     {
+        IEnumerable<MarkdownInline> content = search is { Query.Length: > 0 } ? inlines.ToList() : inlines;
+        imageObjects = null;
+        runPositions.Clear();
+        inlineOffset = 0;
         var paragraph = new Paragraph();
-        AddInlines(paragraph.Inlines, inlines, size, inLink: false);
+        AddInlines(paragraph.Inlines, content, size, inLink: false);
         var text = new RichTextBlock
         {
             TextWrapping = TextWrapping.Wrap,
@@ -212,7 +230,60 @@ internal sealed partial class MarkdownRenderer(double zoom, string? baseDirector
             SelectionHighlightColor = (SolidColorBrush)Brush("QuoteBarBrush")
         };
         text.Blocks.Add(paragraph);
+        if (searchable)
+        {
+            var index = textIndex++;
+            if (search is { Query.Length: > 0 })
+            {
+                var projection = MarkdownDisplay.ProjectInlines(content, imageObjects);
+                Highlight(text.TextHighlighters, projection.Text, index, projection.DisplayOffset);
+                if (ActiveMatch(index) is { } match)
+                {
+                    ActiveSearchElement = text;
+                    var start = projection.DisplayOffset(match.Start);
+                    var run = runPositions.FirstOrDefault(r => start >= r.Start && start < r.Start + r.Run.Text.Length);
+                    if (run.Run is not null) ActiveSearchPointer = run.Run.ContentStart.GetPositionAtOffset(start - run.Start, LogicalDirection.Forward);
+                }
+            }
+        }
         return text;
+    }
+
+    private SearchMatch? ActiveMatch(int index) => ReferenceEquals(currentBlock, activeBlock) && search?.Match is { } match && match.TextIndex == index ? match : null;
+
+    private void Highlight(IList<TextHighlighter> target, string text, int index, Func<int, int>? displayOffset = null)
+    {
+        if (search is not { Query.Length: > 0 }) return;
+        var active = ActiveMatch(index);
+        var ordinary = new TextHighlighter { Background = Brush("LineBrush"), Foreground = Brush("TextBrush") };
+        var comparison = search.MatchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+        var found = text.IndexOf(search.Query, comparison);
+        // Keep ranges bounded even for one enormous code block. The selected
+        // occurrence is always highlighted, including beyond this visible-mark limit.
+        for (var count = 0; found >= 0 && count < 2000; count++, found = text.IndexOf(search.Query, found + 1, comparison))
+            if (active is null || found + search.Query.Length <= active.Start || found >= active.Start + active.Length)
+                Add(ordinary, found, search.Query.Length);
+        if (ordinary.Ranges.Count > 0) target.Add(ordinary);
+        if (active is not null)
+        {
+            var selected = new TextHighlighter { Background = Brush("AccentBrush"), Foreground = Brush("BackgroundBrush") };
+            Add(selected, active.Start, active.Length);
+            target.Add(selected);
+        }
+
+        void Add(TextHighlighter highlighter, int start, int length)
+        {
+            var first = displayOffset?.Invoke(start) ?? start;
+            var end = displayOffset?.Invoke(start + length) ?? start + length;
+            if (end > first) highlighter.Ranges.Add(new Microsoft.UI.Xaml.Documents.TextRange { StartIndex = first, Length = end - first });
+        }
+    }
+
+    private void AddRun(InlineCollection target, Run run)
+    {
+        target.Add(run);
+        if (search is { Query.Length: > 0 }) runPositions.Add((run, inlineOffset));
+        inlineOffset += run.Text.Length;
     }
 
     private void AddInlines(InlineCollection target, IEnumerable<MarkdownInline> inlines, double size, bool inLink)
@@ -221,22 +292,26 @@ internal sealed partial class MarkdownRenderer(double zoom, string? baseDirector
         {
             switch (inline.Kind)
             {
-                case InlineKind.Text: target.Add(new Run { Text = inline.Text }); break;
-                case InlineKind.SoftBreak: target.Add(new Run { Text = " " }); break;
-                case InlineKind.LineBreak: target.Add(new LineBreak()); break;
+                case InlineKind.Text: AddRun(target, new Run { Text = inline.Text }); break;
+                case InlineKind.SoftBreak: AddRun(target, new Run { Text = " " }); break;
+                case InlineKind.LineBreak: target.Add(new LineBreak()); inlineOffset++; break;
                 case InlineKind.Emphasis: target.Add(Wrap(new Italic(), inline, size, inLink)); break;
                 case InlineKind.Strong: target.Add(Wrap(new Bold(), inline, size, inLink)); break;
                 case InlineKind.Underline: target.Add(Wrap(new Underline(), inline, size, inLink)); break;
                 case InlineKind.Strikethrough: target.Add(Wrap(new Span { TextDecorations = TextDecorations.Strikethrough }, inline, size, inLink)); break;
                 case InlineKind.Code:
-                    target.Add(new Run { Text = inline.Text, FontFamily = MonoFont, FontSize = Math.Round(size * 0.9, 1), Foreground = Brush("CodeTextBrush") });
+                    AddRun(target, new Run { Text = inline.Text, FontFamily = MonoFont, FontSize = Math.Round(size * 0.9, 1), Foreground = Brush("CodeTextBrush") });
                     break;
                 case InlineKind.Html:
-                    if (LineBreakTag().IsMatch(inline.Text.Trim())) target.Add(new LineBreak());
+                    if (MarkdownDisplay.IsBreakTag(inline.Text)) { target.Add(new LineBreak()); inlineOffset++; }
                     break;
                 case InlineKind.Image:
-                    if (!inLink && ImageElement(inline, inline: true) is { } image) target.Add(new InlineUIContainer { Child = image });
-                    else target.Add(new Run { Text = AltText(inline), Foreground = Brush("MutedBrush") });
+                    if (!inLink && ImageElement(inline, inline: true) is { } image)
+                    {
+                        target.Add(new InlineUIContainer { Child = image });
+                        if (search is { Query.Length: > 0 }) (imageObjects ??= []).Add(inline);
+                    }
+                    else AddRun(target, new Run { Text = MarkdownDisplay.AltText(inline), Foreground = Brush("MutedBrush") });
                     break;
                 case InlineKind.Link when inLink:
                     AddInlines(target, inline.Children, size, inLink);
@@ -245,7 +320,7 @@ internal sealed partial class MarkdownRenderer(double zoom, string? baseDirector
                 {
                     var link = new Hyperlink { Foreground = Brush("LinkBrush"), UnderlineStyle = UnderlineStyle.Single };
                     AddInlines(link.Inlines, inline.Children, size, inLink: true);
-                    if (link.Inlines.Count == 0) link.Inlines.Add(new Run { Text = inline.Url });
+                    if (link.Inlines.Count == 0) AddRun(link.Inlines, new Run { Text = inline.Url });
                     var url = inline.Url;
                     link.Click += (_, _) => linkInvoked(url);
                     ToolTipService.SetToolTip(link, string.IsNullOrEmpty(inline.Title) ? url : $"{inline.Title}\n{url}");
@@ -262,24 +337,23 @@ internal sealed partial class MarkdownRenderer(double zoom, string? baseDirector
         return span;
     }
 
-    private static string AltText(MarkdownInline image) => image.PlainText() is { Length: > 0 } alt ? $"[{alt}]" : "[image]";
-
     private FrameworkElement? ImageElement(MarkdownInline image, bool inline)
     {
         if (ResolveImage(image.Url) is not { } uri) return null;
         var element = new Image { Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Left, MaxHeight = S(1400) };
+        if (inline) element.Height = S(20);
         if (uri.AbsolutePath.EndsWith(".svg", StringComparison.OrdinalIgnoreCase))
         {
             // SVG has no pixel size to honor: inline ones are usually badges, standalone ones figures.
             var svg = new SvgImageSource(uri);
-            if (inline) element.Height = S(20); else element.MaxWidth = S(720);
+            if (!inline) element.MaxWidth = S(720);
             svg.OpenFailed += (_, _) => element.Visibility = Visibility.Collapsed;
             element.Source = svg;
         }
         else
         {
             var bitmap = new BitmapImage(uri);
-            // Show images at their natural size (scaled with zoom), shrinking only to fit the column.
+            // Standalone images retain natural size; inline images share a stable text-line height.
             bitmap.ImageOpened += (_, _) => element.MaxWidth = bitmap.PixelWidth * zoom;
             bitmap.ImageFailed += (_, _) => element.Visibility = Visibility.Collapsed;
             element.Source = bitmap;
@@ -308,13 +382,4 @@ internal sealed partial class MarkdownRenderer(double zoom, string? baseDirector
         catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException or UriFormatException) { return null; }
     }
 
-    // Pandoc writes "Title {#id .class}"; the outline already strips it, so the page does too.
-    private static IEnumerable<MarkdownInline> StripAttributeBlock(List<MarkdownInline> inlines)
-    {
-        if (inlines is not [.., { Kind: InlineKind.Text } last]) return inlines;
-        var text = last.Text.TrimEnd();
-        var open = text.LastIndexOf('{');
-        if (!text.EndsWith('}') || open < 0 || open + 1 >= text.Length || !(text[open + 1] is '#' or '.' or '-' || text.IndexOf('=', open) > 0)) return inlines;
-        return [.. inlines.Take(inlines.Count - 1), new MarkdownInline(InlineKind.Text) { Text = text[..open].TrimEnd() }];
-    }
 }

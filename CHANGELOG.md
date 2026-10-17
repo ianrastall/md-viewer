@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.3.0
+
+- Find (Ctrl+F) searches rendered Markdown or editable source, with Match case, result counts, highlighting, and wrapping Next/Previous navigation (F3 / Shift+F3).
+- Preview search follows visible text across formatting, tables, and nested blocks, and scrolls to the matching line inside long code blocks. Source search includes literal Markdown syntax and keeps the query field focused while selecting and scrolling to matches.
+- Search uses bounded counting and constant-space match navigation. Counts display 10,000+ beyond the limit; all occurrences remain reachable. Preview marks are bounded per text control, with the selected match always highlighted.
+- Inline images use a stable text-line height, avoiding layout jumps during image decoding and search navigation.
+- Added 52 managed regression checks covering matching, projection, large and deeply nested documents, and view-model integration.
+
 ## 2.2.1
 
 - Undo/Redo history is bounded together by 100 snapshots and a 32 MiB text budget, avoiding unbounded growth when editing large documents.

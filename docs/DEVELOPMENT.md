@@ -119,3 +119,37 @@ The view-model harness passes 89 checks, including 14 additional history checks 
 [2.2.1](https://github.com/ianrastall/md-viewer/releases/tag/v2.2.1) is published from `ca60f53`, matching the binary's embedded revision. The ZIP contains the verified standalone installer, installation notes, and license notices. Its installer and ZIP hashes match GitHub's uploaded asset digests. The release is unsigned, as documented in its notes. Both main's source and the checked-in package version are current in `D:\dev\proj\md-viewer`.
 
 History still stores full strings rather than deltas. Older steps can therefore disappear before the 100-step maximum for large documents. Search, unsaved-draft recovery, external-file-change detection, and more precise caret/scroll restoration remain future work.
+
+## Milestone 5 — Find in preview and source
+
+### Behavior
+
+Find (Ctrl+F) searches whichever view is visible. F3 / Shift+F3 move forward / backward with wrapping; Enter / Shift+Enter do the same while typing a query. Match case switches from ordinal case-insensitive to ordinal case-sensitive comparison. Overlapping literal matches are included. Escape closes the bar and returns focus to the document. Queries and case preference survive closing the bar during the session; opening another document closes Find. Search does not edit the document, add history, or affect dirty state.
+
+Preview search follows displayed text: phrases can cross bold, emphasis, and links. It includes headings, paragraphs, table cells, code, raw HTML shown as source, and front matter. It excludes hidden comments, heading attributes, link destinations, generated list markers and code-language labels, and image/alt labels. Matches do not cross paragraph or table-cell boundaries. Source search includes the literal Markdown, so comments, destinations, and syntax remain findable there. Switching modes rebuilds the appropriate index.
+
+### Components and interoperation
+
+`DocumentSearch` owns the query, count, selected occurrence, and navigation. Source has one string segment. Preview uses segments tagged with their root block and local text-control index; this lets the same search engine navigate an entirely different representation. Counting stops after detecting more than 10,000 matches. Navigation uses string searches from the current offset, retaining one match rather than an array of every result, so all occurrences remain reachable after the counter shows 10,000+. The preview index retains projected strings and metadata proportional to document size; constant-space navigation refers to additional match storage, not the whole index.
+
+`MarkdownDisplay` centralizes heading-attribute stripping, HTML line-break recognition, and visible-text projection used by search and rendering. Block traversal uses an explicit stack. An image delimiter prevents ordinary words on either side of a picture from being joined. A second projection maps those delimiter offsets to actual WinUI text offsets: inline image objects occupy no TextHighlighter text characters, while fallback labels occupy their full string length. Constructing the search index does not resolve image files or initiate network requests.
+
+`MainViewModel.Find.cs` owns search state and commands. Source edits invalidate its index immediately, then refresh counts with the existing 200 ms parsed-document update. Navigating before that refresh rebuilds from the current source first. Background count refreshes preserve the selected match where possible and do not move the editing caret. Busy operations disable navigation and query controls through existing operation state. No C++ module or C ABI changed.
+
+The window supplies the bar, focus, shortcuts, and native source selection. WinUI's unfocused TextBox selection is transparent by default, so an explicit dark green brush makes the selected source occurrence visible while the query field retains focus. Scrolling uses actual character rectangles in content coordinates, accounting for wrapping and zoom rather than estimating a line number or moving keyboard focus.
+
+`MarkdownRenderer` paints ordinary and active TextHighlighters as virtualized blocks are created. It retains Run positions only during search, mapping the active offset through formatting to a TextPointer. `MarkdownView` realizes the matching root, brings the actual character rectangle into view, and settles the position over queued layout passes. This reaches lines deep inside one code block or nested quotation. Existing reading-width and zoom logic still applies. Inline raster images now use the same stable, zoom-scaled 20-pixel height as inline SVGs; their previous undecoded size could temporarily expand the layout and disrupt navigation. Standalone images retain their natural-size behavior.
+
+### Verification
+
+The managed harness passes 141 checks, including 52 new checks for overlaps, case, UTF-16 offsets, wrapping, bounded counts with navigation beyond the limit, Markdown projection and image-offset mapping, retained selections, mode changes, current source edits, busy state, saving, history, and document replacement. It also indexes and searches 20,000 preview blocks (28 ms in one local run, measured for context rather than enforced as a timing threshold) and traverses 5,000 nested blocks without recursive indexing. The full WinUI build passed with zero warnings and errors.
+
+Native desktop checks used a saved 511-line fixture containing formatted phrases, a local inline bitmap, a table, a 90-line code block, and a large nested quotation. They verified exact preview highlights across formatting and after an inline image, navigation to an unrealized root, matching the line deep inside code and quotations, Match case, Escape, and source selection while keeping query focus. Repeated F3 and Shift+F3 from already-scrolled source verified both directions and wrapping. Search left the fixture clean. Temporary coordinate diagnostics were removed from production code.
+
+The complete 2.3.0 release pipeline and hosted verification are the final delivery checks for this milestone; publication evidence will be recorded here after completion.
+
+### Limits and next work
+
+Search is literal, with no replacement, regular expressions, or whole-word option. Matching and projection run synchronously on the UI thread; counting is bounded by match count, not scan time, so a huge document with rare or absent matches can still take noticeable time. Preview stores a text projection alongside the parsed tree and rebuilds visible controls when the query or selected occurrence changes. Ordinary highlights are limited to 2,000 per text control, with the selected match always painted. The standard source TextBox and full-string history remain the editor's scalability limits.
+
+Next priorities are recovery for unsaved drafts after interruption and detection of external file changes before overwriting an edited file. More precise caret restoration through Undo/Redo and source/preview changes remains useful. Windows 10 installation coverage and publicly trusted signing are still outside the exercised environment.

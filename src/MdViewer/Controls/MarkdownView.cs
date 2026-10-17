@@ -1,8 +1,10 @@
 using MdViewer.Interop.Markdown;
+using MdViewer.Services;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Input;
 using VirtualKeyModifiers = Windows.System.VirtualKeyModifiers;
 
@@ -43,14 +45,16 @@ public sealed partial class MarkdownView : UserControl
         AddHandler(PointerWheelChangedEvent, new PointerEventHandler(OnPointerWheelChanged), handledEventsToo: true);
     }
 
-    public void Show(MarkdownDocument? value, double zoom, string? baseDirectory, bool keepPosition)
+    public void Show(MarkdownDocument? value, double zoom, string? baseDirectory, bool keepPosition, SearchPresentation? search = null)
     {
         var ratio = keepPosition && scroller.ScrollableHeight > 0 ? scroller.VerticalOffset / scroller.ScrollableHeight : 0;
         document = value;
         zoomFactor = zoom;
         // Clearing the source recycles every host, so the same document re-renders at a new zoom.
         repeater.ItemsSource = null;
-        factory.Renderer = new MarkdownRenderer(zoom, baseDirectory, url => LinkInvoked?.Invoke(this, url));
+        var active = search?.Match;
+        var activeBlock = value is not null && active is not null && active.BlockIndex >= 0 && active.BlockIndex < value.Blocks.Count ? value.Blocks[active.BlockIndex] : null;
+        factory.Renderer = new MarkdownRenderer(zoom, baseDirectory, url => LinkInvoked?.Invoke(this, url), search, activeBlock);
         factory.First = value?.Blocks.FirstOrDefault();
         repeater.MaxWidth = ReadingWidth * zoom;
         repeater.Margin = new Thickness(56 * zoom, 36 * zoom, 56 * zoom, 120);
@@ -73,13 +77,30 @@ public sealed partial class MarkdownView : UserControl
         DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => Settle(element, 3));
     }
 
-    private void Settle(UIElement element, int attempts)
+    public void ScrollToSearchMatch(SearchMatch? match)
     {
-        if (!ReferenceEquals(VisualParent(element), repeater)) return;
+        if (document is null || match is null || match.BlockIndex < 0 || match.BlockIndex >= document.Blocks.Count) return;
+        var host = repeater.GetOrCreateElement(match.BlockIndex);
+        host.UpdateLayout();
+        var element = (UIElement?)factory.Renderer?.ActiveSearchElement ?? host;
+        var pointer = factory.Renderer?.ActiveSearchPointer;
+        element.UpdateLayout();
+        var options = new BringIntoViewOptions { VerticalAlignmentRatio = 0, HorizontalAlignmentRatio = 0.5, AnimationDesired = false };
+        if (pointer is not null && pointer.GetCharacterRect(LogicalDirection.Forward) is { Height: > 0 } rect) options.TargetRect = rect;
+        element.StartBringIntoView(options);
+        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => Settle(element, 3, pointer));
+    }
+
+    private void Settle(UIElement element, int attempts, TextPointer? pointer = null)
+    {
+        var parent = VisualParent(element);
+        while (parent is UIElement current && !ReferenceEquals(parent, repeater)) parent = VisualParent(current);
+        if (!ReferenceEquals(parent, repeater)) return;
         var top = element.TransformToVisual(repeater).TransformPoint(default).Y + repeater.Margin.Top - 16;
+        if (pointer is not null && pointer.GetCharacterRect(LogicalDirection.Forward) is { Height: > 0 } rect) top += rect.Y;
         if (Math.Abs(scroller.VerticalOffset - top) < 1) return;
         scroller.ChangeView(null, Math.Max(0, top), null, disableAnimation: true);
-        if (attempts > 1) DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => Settle(element, attempts - 1));
+        if (attempts > 1) DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => Settle(element, attempts - 1, pointer));
     }
 
     private static DependencyObject? VisualParent(UIElement element) => Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(element);

@@ -43,9 +43,22 @@ public sealed partial class MainWindow : Window, IViewerDialogs
         Reader.LinkInvoked += Reader_LinkInvoked;
         Reader.ZoomRequested += (_, direction) => (direction > 0 ? ViewModel.ZoomInCommand : ViewModel.ZoomOutCommand).Execute(null);
         ViewModel.PropertyChanged += ViewModelChanged;
+        ViewModel.FindChanged += (_, navigate) => UpdateFind(navigate);
+        ViewModel.FindFocusRequested += (_, _) => DispatcherQueue.TryEnqueue(() => FocusFind(selectAll: true));
         Title = ViewModel.WindowTitle;
 
         AddShortcut(VirtualKey.R, VirtualKeyModifiers.Control, () => ViewModel.ToggleRawCommand.Execute(null));
+        AddShortcut(VirtualKey.F, VirtualKeyModifiers.Control, () => ViewModel.FindCommand.Execute(null));
+        AddShortcut(VirtualKey.F3, VirtualKeyModifiers.None, () => NavigateFind(backwards: false));
+        AddShortcut(VirtualKey.F3, VirtualKeyModifiers.Shift, () => NavigateFind(backwards: true));
+        var closeFind = new KeyboardAccelerator { Key = VirtualKey.Escape };
+        closeFind.Invoked += (_, e) =>
+        {
+            if (!ViewModel.IsFindOpen || ViewModel.IsBusy) return;
+            ViewModel.CloseFindCommand.Execute(null);
+            e.Handled = true;
+        };
+        RootGrid.KeyboardAccelerators.Add(closeFind);
         foreach (var key in new[] { VirtualKey.Add, (VirtualKey)187 })
             AddShortcut(key, VirtualKeyModifiers.Control, () => ViewModel.ZoomInCommand.Execute(null));
         foreach (var key in new[] { VirtualKey.Subtract, (VirtualKey)189 })
@@ -91,32 +104,113 @@ public sealed partial class MainWindow : Window, IViewerDialogs
         switch (e.PropertyName)
         {
             case nameof(MainViewModel.Document):
-                if (ViewModel.IsRichView) Reader.Show(ViewModel.Document, ViewModel.ZoomFactor, ViewModel.BaseDirectory, keepPosition: false);
+                if (ViewModel.IsRichView) ShowReader(keepPosition: ViewModel.IsFindOpen);
                 RebuildOutline();
                 break;
             case nameof(MainViewModel.SourceText):
                 SyncSource();
                 break;
             case nameof(MainViewModel.IsRawView):
-                if (ViewModel.IsRawView) DispatcherQueue.TryEnqueue(() => { if (ViewModel.IsRawView) RawEditor.Focus(FocusState.Programmatic); });
+                if (ViewModel.IsRawView) DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (!ViewModel.IsRawView) return;
+                    if (ViewModel.IsFindOpen) { UpdateFind(navigate: true); FocusFind(selectAll: false); }
+                    else RawEditor.Focus(FocusState.Programmatic);
+                });
                 else DispatcherQueue.TryEnqueue(() =>
                 {
                     if (ViewModel.IsRawView) return;
                     // A hidden repeater has no usable viewport. Realize again after
                     // the preview is visible so short documents get the right width.
-                    Reader.Show(ViewModel.Document, ViewModel.ZoomFactor, ViewModel.BaseDirectory, keepPosition: true);
-                    Reader.FocusReader();
+                    ShowReader(keepPosition: true);
+                    if (ViewModel.IsFindOpen) { Reader.ScrollToSearchMatch(ViewModel.FindMatch); FocusFind(selectAll: false); }
+                    else Reader.FocusReader();
                 });
                 break;
             case nameof(MainViewModel.BaseDirectory):
-                if (ViewModel.IsRichView) Reader.Show(ViewModel.Document, ViewModel.ZoomFactor, ViewModel.BaseDirectory, keepPosition: true);
+                if (ViewModel.IsRichView) ShowReader(keepPosition: true);
                 break;
             case nameof(MainViewModel.ZoomFactor):
-                if (ViewModel.IsRichView) Reader.Show(ViewModel.Document, ViewModel.ZoomFactor, ViewModel.BaseDirectory, keepPosition: true);
+                if (ViewModel.IsRichView)
+                {
+                    ShowReader(keepPosition: true);
+                    if (ViewModel.IsFindOpen) Reader.ScrollToSearchMatch(ViewModel.FindMatch);
+                }
+                else if (ViewModel.IsFindOpen) DispatcherQueue.TryEnqueue(() => UpdateFind(navigate: true));
+                break;
+            case nameof(MainViewModel.IsFindOpen):
+                if (!ViewModel.IsFindOpen)
+                {
+                    if (ViewModel.IsRawView) RawEditor.Focus(FocusState.Programmatic);
+                    else Reader.FocusReader();
+                }
                 break;
             case nameof(MainViewModel.WindowTitle):
                 Title = ViewModel.WindowTitle;
                 break;
+        }
+    }
+
+    private void ShowReader(bool keepPosition) => Reader.Show(ViewModel.Document, ViewModel.ZoomFactor, ViewModel.BaseDirectory, keepPosition, ViewModel.FindPresentation);
+
+    private void UpdateFind(bool navigate)
+    {
+        if (ViewModel.IsRichView)
+        {
+            ShowReader(keepPosition: true);
+            if (navigate) Reader.ScrollToSearchMatch(ViewModel.FindMatch);
+        }
+        else if (navigate && ViewModel.FindMatch is { } match)
+        {
+            if (match.Start < 0 || match.Start > RawEditor.Text.Length - match.Length) return;
+            RawEditor.Select(match.Start, match.Length);
+            RawEditor.UpdateLayout();
+            // Unfocused TextBoxes select without scrolling. Use the actual character
+            // geometry so wrapping and zoom are honored without interrupting typing/IME.
+            if (RawEditor.Visibility == Visibility.Visible && SourceScroller(RawEditor) is { } scroll &&
+                RawEditor.GetRectFromCharacterIndex(match.Start, false) is { Height: > 0 } rect)
+            {
+                // GetRectFromCharacterIndex returns content coordinates, even when scrolled.
+                scroll.ChangeView(null, Math.Max(0, rect.Y - 16), null, disableAnimation: true);
+            }
+        }
+        else if (navigate) RawEditor.Select(RawEditor.SelectionStart, 0);
+    }
+
+    private static ScrollViewer? SourceScroller(DependencyObject root)
+    {
+        if (root is ScrollViewer scroll) return scroll;
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+            if (SourceScroller(VisualTreeHelper.GetChild(root, i)) is { } child) return child;
+        return null;
+    }
+
+    private void FocusFind(bool selectAll)
+    {
+        if (!ViewModel.IsFindOpen) return;
+        FindBox.Focus(FocusState.Programmatic);
+        if (selectAll) FindBox.SelectAll();
+    }
+
+    private void NavigateFind(bool backwards)
+    {
+        if (ViewModel.IsBusy) return;
+        if (!ViewModel.IsFindOpen) { ViewModel.FindCommand.Execute(null); return; }
+        (backwards ? ViewModel.FindPreviousCommand : ViewModel.FindNextCommand).Execute(null);
+    }
+
+    private void FindBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (ViewModel is not null) ViewModel.FindQuery = FindBox.Text;
+    }
+
+    private void FindBox_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == VirtualKey.Escape) { ViewModel.CloseFindCommand.Execute(null); e.Handled = true; }
+        else if (e.Key == VirtualKey.Enter)
+        {
+            NavigateFind(Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down));
+            e.Handled = true;
         }
     }
 

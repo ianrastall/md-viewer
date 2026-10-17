@@ -85,6 +85,7 @@ public partial class MainViewModel : ObservableObject
     partial void OnMarkdownTextChanged(string value)
     {
         UpdateDirty();
+        findSourceDirty = true;
         OnPropertyChanged(nameof(SourceText));
     }
     partial void OnOriginChanged(DocumentOrigin value)
@@ -99,17 +100,20 @@ public partial class MainViewModel : ObservableObject
     partial void OnIsRawViewChanged(bool value)
     {
         OnPropertyChanged(nameof(IsRichView));
+        OnPropertyChanged(nameof(FindPlaceholder));
         if (!value)
         {
             EndSourceEdit();
             _ = FlushSourceAsync();
         }
+        RefreshFind(rebuild: true, navigate: true);
     }
     partial void OnIsBusyChanged(bool value)
     {
         OnPropertyChanged(nameof(IsIdle));
         OnPropertyChanged(nameof(IsSourceReadOnly));
         NotifyHistory();
+        NotifyFind(navigate: false, notifyView: false);
     }
     partial void OnUpdateNoticeChanged(string value) => OnPropertyChanged(nameof(HasUpdateNotice));
     partial void OnDocumentChanged(MarkdownDocument? value)
@@ -120,6 +124,7 @@ public partial class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(OutlineSummary));
         OnPropertyChanged(nameof(HasOutline));
         OnPropertyChanged(nameof(HasNoOutline));
+        RefreshFind(rebuild: true, navigate: false);
     }
     partial void OnZoomPercentChanged(int value)
     {
@@ -364,6 +369,7 @@ public partial class MainViewModel : ObservableObject
 
     private async Task LoadAsync(string text, DocumentOrigin origin, string? filePath, string? sourcePath, string? saved, string encoding)
     {
+        IsFindOpen = false;
         CancelSourceRefresh();
         sourceNeedsRefresh = false;
         EndSourceEdit();
@@ -442,6 +448,7 @@ public partial class MainViewModel : ObservableObject
 
         - The **outline** on the left lists every heading. Click one to jump to it.
         - **Source** (Ctrl+R) switches between editable Markdown and the rendered preview. Changes update the outline and statistics after a short pause in typing.
+        - **Find** (Ctrl+F) searches the current view. Use F3 / Shift+F3 for the next / previous match and Escape to close Find.
         - Undo typing, Format, and Reflow with Ctrl+Z; redo with Ctrl+Y or Ctrl+Shift+Z.
         - Zoom with Ctrl+Plus, Ctrl+Minus, and Ctrl+0, or Ctrl+mouse wheel.
         - Links to other Markdown files open here; web links open in your browser.

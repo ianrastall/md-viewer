@@ -1,4 +1,5 @@
 using MdViewer.Interop;
+using MdViewer.Interop.Markdown;
 using MdViewer.Services;
 using MdViewer.ViewModels;
 
@@ -320,6 +321,177 @@ try
     for (var i = 0; i < 6; i++) stepsOnly.Record(i.ToString());
     Check("history count limit keeps nearest undo steps", stepsOnly.Count == 3 && stepsOnly.Undo("6") == "5" && stepsOnly.Undo("5") == "4" && stepsOnly.Undo("4") == "3" && !stepsOnly.CanUndo && stepsOnly.Count == 3);
     Check("history count limit survives undo/redo transfers", stepsOnly.Redo("3") == "4" && stepsOnly.Redo("4") == "5" && stepsOnly.Redo("5") == "6" && !stepsOnly.CanRedo && stepsOnly.Count == 3 && stepsOnly.CharacterCount == 3);
+
+    var sourceSearch = DocumentSearch.Source("One one\rA+B 😀 needle");
+    sourceSearch.SetQuery("one", matchCase: false);
+    Check("find source is case insensitive by default", sourceSearch.Count == 2 && sourceSearch.Ordinal == 1 && sourceSearch.Match is { Start: 0, Length: 3, BlockIndex: -1 });
+    Check("find next advances", sourceSearch.Move(false) is { Start: 4 } && sourceSearch.Ordinal == 2);
+    Check("find next wraps", sourceSearch.Move(false) is { Start: 0 } && sourceSearch.Ordinal == 1);
+    Check("find previous wraps", sourceSearch.Move(true) is { Start: 4 } && sourceSearch.Ordinal == 2);
+    sourceSearch.SetQuery("One", matchCase: true);
+    Check("find case option", sourceSearch.Count == 1 && sourceSearch.Match is { Start: 0 } && sourceSearch.Move(true) is { Start: 0 });
+    sourceSearch.SetQuery("A+B", matchCase: false);
+    Check("find query is literal", sourceSearch.Count == 1 && sourceSearch.Match is { Start: 8, Length: 3 });
+    sourceSearch.SetQuery("needle", matchCase: false);
+    Check("find offsets are UTF16", sourceSearch.Match is { Start: 15, Length: 6 });
+    sourceSearch.SetQuery("", matchCase: false);
+    Check("empty find query is safe", sourceSearch.Count == 0 && sourceSearch.Match is null && sourceSearch.Move(false) is null);
+
+    var overlapping = DocumentSearch.Source("aaaa");
+    overlapping.SetQuery("aa", false);
+    Check("find includes overlapping occurrences", overlapping.Count == 3 && overlapping.Move(false) is { Start: 1 } && overlapping.Move(false) is { Start: 2 } && overlapping.Move(false) is { Start: 0 } && overlapping.Move(true) is { Start: 2 });
+    var abundantText = new string('a', DocumentSearch.CountLimit + 20) + " tail a";
+    var abundant = DocumentSearch.Source(abundantText);
+    abundant.SetQuery("a", false);
+    Check("find count is bounded", abundant.Count == DocumentSearch.CountLimit && abundant.CountLimited);
+    Check("find can navigate beyond the count limit", abundant.Move(true)?.Start == abundantText.Length - 1 && abundant.Move(false) is { Start: 0 });
+    abundant.SetQuery("tail", false);
+    Check("find resets limited count for new query", abundant.Count == 1 && !abundant.CountLimited);
+
+    const string searchMarkdown = """
+        # Title {#hidden-id}
+
+        A **joined** phrase and [label](https://example.test) plus ![hidden alt](missing.png).
+
+        <!-- secret -->
+
+        > Quote **joined** phrase.
+        >
+        > `code needle`
+
+        | Column |
+        | --- |
+        | table needle |
+
+        ```csharp
+        needle in code
+        ```
+
+        ![picture alt](missing.png)
+        """;
+    var searchDocument = MarkdownEngine.Parse(searchMarkdown);
+    var previewSearch = DocumentSearch.Preview(searchDocument);
+    previewSearch.SetQuery("joined phrase", false);
+    Check("preview find crosses inline formatting", previewSearch.Count == 2 && previewSearch.Match is { BlockIndex: 1, TextIndex: 0 });
+    var rawSearch = DocumentSearch.Source(searchMarkdown);
+    rawSearch.SetQuery("joined phrase", false);
+    Check("source find keeps Markdown syntax", rawSearch.Count == 0);
+    previewSearch.SetQuery("secret", false);
+    rawSearch.SetQuery("secret", false);
+    Check("preview excludes hidden comments", previewSearch.Count == 0 && rawSearch.Count == 1);
+    previewSearch.SetQuery("example.test", false);
+    Check("preview excludes hidden link destinations", previewSearch.Count == 0);
+    previewSearch.SetQuery("hidden-id", false);
+    Check("preview excludes stripped heading attributes", previewSearch.Count == 0);
+    previewSearch.SetQuery("hidden alt", false);
+    Check("preview excludes inline image alternatives", previewSearch.Count == 0);
+    previewSearch.SetQuery("picture alt", false);
+    Check("preview excludes standalone image alternatives", previewSearch.Count == 0);
+    previewSearch.SetQuery("csharp", false);
+    Check("preview excludes generated code labels", previewSearch.Count == 0);
+    previewSearch.SetQuery("needle", false);
+    Check("preview indexes nested text and literal code", previewSearch.Count == 3 && previewSearch.Match is { TextIndex: 1 } q && searchDocument.Blocks[q.BlockIndex].Kind == BlockKind.Quote);
+    var tableMatch = previewSearch.Move(false);
+    Check("preview navigation reaches table cells", tableMatch is not null && searchDocument.Blocks[tableMatch.BlockIndex].Kind == BlockKind.Table);
+    var codeMatch = previewSearch.Move(false);
+    Check("preview navigation reaches code blocks", codeMatch is not null && searchDocument.Blocks[codeMatch.BlockIndex].Kind == BlockKind.Code && previewSearch.Ordinal == 3);
+    Check("preview previous reverses segment navigation", previewSearch.Move(true) == tableMatch);
+    previewSearch.SetQuery("needle", false, codeMatch);
+    Check("find preserves a retained location when rebuilding", previewSearch.Match == codeMatch && previewSearch.Ordinal == 3);
+    var emptySearch = DocumentSearch.Preview(MarkdownEngine.Parse(""));
+    emptySearch.SetQuery("needle", false);
+    Check("empty preview search is safe", emptySearch.Count == 0 && emptySearch.Move(true) is null);
+
+    var imageInline = new MarkdownInline(InlineKind.Image);
+    imageInline.Children.Add(new(InlineKind.Text) { Text = "alt" });
+    MarkdownInline[] imageLine = [new(InlineKind.Text) { Text = "before " }, imageInline, new(InlineKind.Text) { Text = " after" }];
+    var fallbackProjection = MarkdownDisplay.ProjectInlines(imageLine, null);
+    var objectProjection = MarkdownDisplay.ProjectInlines(imageLine, new HashSet<MarkdownInline> { imageInline });
+    Check("image projection uses a non-searchable object marker", fallbackProjection.Text == "before \uFFFC after" && objectProjection.Text == fallbackProjection.Text);
+    Check("fallback image offsets map to displayed text", fallbackProjection.DisplayOffset(9) == 13 && fallbackProjection.DisplayOffset(14) == 18);
+    Check("image objects occupy no highlight text characters", objectProjection.DisplayOffset(9) == 8);
+    Check("HTML breaks share display projection", MarkdownDisplay.InlineText([new(InlineKind.Text) { Text = "a" }, new(InlineKind.Html) { Text = "<BR />" }, new(InlineKind.Text) { Text = "b" }]) == "a\rb");
+    var deepRoot = new MarkdownBlock(BlockKind.Quote);
+    var deepLeaf = deepRoot;
+    for (var i = 0; i < 5000; i++) { var child = new MarkdownBlock(BlockKind.Quote); deepLeaf.Blocks.Add(child); deepLeaf = child; }
+    var deepParagraph = new MarkdownBlock(BlockKind.Paragraph);
+    deepParagraph.Inlines.Add(new(InlineKind.Text) { Text = "deep needle" });
+    deepLeaf.Blocks.Add(deepParagraph);
+    var deepSearch = DocumentSearch.Preview(new MarkdownDocument { Blocks = [deepRoot], Headings = [], LineCount = 1, WordCount = 2, CharacterCount = 11 });
+    deepSearch.SetQuery("needle", false);
+    Check("search indexing handles deep block trees iteratively", deepSearch.Count == 1 && deepSearch.Match is { BlockIndex: 0, TextIndex: 0, Start: 5 });
+
+    var manyBlocks = Enumerable.Range(0, 20000).Select(i =>
+    {
+        var block = new MarkdownBlock(BlockKind.Paragraph);
+        block.Inlines.Add(new(InlineKind.Text) { Text = $"Block {i} needle" });
+        return block;
+    }).ToArray();
+    var searchTimer = System.Diagnostics.Stopwatch.StartNew();
+    var largeSearch = DocumentSearch.Preview(new MarkdownDocument { Blocks = manyBlocks, Headings = [], LineCount = 40000, WordCount = 60000, CharacterCount = 400000 });
+    largeSearch.SetQuery("needle", false);
+    Check("large preview navigation reaches matches beyond bounded count", largeSearch.CountLimited && largeSearch.Count == DocumentSearch.CountLimit && largeSearch.Move(true) is { BlockIndex: 19999 } && largeSearch.Move(false) is { BlockIndex: 0 });
+    Console.WriteLine($"      indexed and searched 20,000 preview blocks in {searchTimer.ElapsedMilliseconds} ms");
+
+    // Find is a reading operation: it never changes saved text or edit history.
+    var findDialogs = new FakeDialogs();
+    var finder = new MainViewModel(findDialogs, ViewerSettings.Load(Path.Combine(scratch.FullName, "find-settings.json")));
+    await finder.OpenFileAsync(file);
+    finder.FindCommand.Execute(null);
+    finder.FindQuery = "child";
+    Check("find opens in the current view", finder.IsFindOpen && finder.IsRichView && finder.CanFindNavigate && finder.FindPresentation is not null && !finder.IsDirty && !finder.CanUndo);
+    var findFocusCount = 0;
+    finder.FindFocusRequested += (_, _) => findFocusCount++;
+    finder.FindCommand.Execute(null);
+    Check("repeated find refocuses without closing", finder.IsFindOpen && findFocusCount == 1);
+    finder.IsRawView = true;
+    Check("find switches to normalized source offsets", finder.FindMatch is { BlockIndex: -1 } && finder.FindPresentation is null && finder.FindPlaceholder == "Find in Markdown source" && finder.SourceText.Substring(finder.FindMatch.Start, finder.FindMatch.Length).Equals("Child", StringComparison.OrdinalIgnoreCase));
+    finder.FindMatchCase = true;
+    Check("find match case updates counts", finder.FindSummary == "No matches" && !finder.CanFindNavigate);
+    finder.FindQuery = "Child";
+    Check("find exact case restores navigation", finder.FindSummary == "1 of 1" && finder.CanFindNavigate);
+    finder.EditSource("# One\r\rA **joined** phrase.\r\r<!-- secret -->\r\rAnother one.\r");
+    finder.FindMatchCase = false;
+    finder.FindQuery = "one";
+    Check("find sees edits before preview debounce", finder.FindSummary == "1 of 2" && finder.FindMatch is { Start: 2 });
+    finder.FindNextCommand.Execute(null);
+    Check("find view model advances", finder.FindSummary == "2 of 2");
+    finder.FindNextCommand.Execute(null);
+    Check("find view model wraps", finder.FindSummary == "1 of 2");
+    finder.FindPreviousCommand.Execute(null);
+    Check("find view model previous wraps", finder.FindSummary == "2 of 2");
+    var navigations = new List<bool>();
+    finder.FindChanged += (_, navigate) => navigations.Add(navigate);
+    await finder.FlushSourceAsync();
+    Check("background find refresh leaves the editor caret alone", navigations.Count > 0 && !navigations[^1]);
+    finder.FindQuery = "joined phrase";
+    Check("source query respects markup", finder.FindSummary == "No matches");
+    finder.IsRawView = false;
+    Check("same query finds visible formatted text", finder.FindSummary == "1 of 1" && finder.FindMatch is { BlockIndex: >= 0 });
+    finder.FindQuery = "secret";
+    Check("preview view model excludes hidden content", finder.FindSummary == "No matches");
+    finder.IsRawView = true;
+    Check("source view model includes hidden content", finder.FindSummary == "1 of 1");
+    finder.FindQuery = "one";
+    finder.EditSource("# Removed\r");
+    finder.FindNextCommand.Execute(null);
+    Check("find next revalidates pending source changes", finder.FindSummary == "No matches" && finder.FindMatch is null);
+    finder.EditSource("# One\r");
+    finder.FindQuery = "One";
+    var pendingFindSave = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+    findDialogs.PendingSave = pendingFindSave.Task;
+    var findSaving = finder.SaveAsCommand.ExecuteAsync(null);
+    Check("find navigation disables during document commands", finder.IsBusy && !finder.CanFindNavigate && !finder.FindNextCommand.CanExecute(null));
+    pendingFindSave.SetResult(null);
+    await findSaving;
+    Check("find navigation returns after cancelled save", finder.IsFindOpen && finder.CanFindNavigate && finder.IsDirty && finder.CanUndo);
+    finder.CloseFindCommand.Execute(null);
+    Check("close find preserves document and history", !finder.IsFindOpen && finder.FindMatch is null && finder.IsDirty && finder.CanUndo && finder.MarkdownText == "# One\n");
+    finder.FindCommand.Execute(null);
+    findDialogs.Unsaved = UnsavedChoice.Discard;
+    await finder.NewCommand.ExecuteAsync(null);
+    Check("new document clears find state", !finder.IsFindOpen && !finder.CanFindNavigate && finder.FindMatch is null && !finder.IsDirty);
+    Check("find reports no unexpected errors", findDialogs.Errors.Count == 0, string.Join(" | ", findDialogs.Errors));
 }
 finally { scratch.Delete(recursive: true); }
 

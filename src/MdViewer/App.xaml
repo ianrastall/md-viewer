@@ -27,6 +27,7 @@
    <SolidColorBrush x:Key="CodeTextBrush" Color="#B9E8C6" />
    <SolidColorBrush x:Key="LinkBrush" Color="#7FDB9C" />
    <SolidColorBrush x:Key="QuoteBarBrush" Color="#2F8650" />
+   <SolidColorBrush x:Key="SearchSelectionBrush" Color="#245B37" />
    <Style TargetType="Button"><Setter Property="CornerRadius" Value="6" /></Style>
    <Style TargetType="TextBox"><Setter Property="CornerRadius" Value="6" /></Style>
   </ResourceDictionary>

@@ -59,6 +59,7 @@
     <AppBarToggleButton Label="Source" IsChecked="{x:Bind ViewModel.IsRawView, Mode=TwoWay}" ToolTipService.ToolTip="Edit Markdown source or show the preview (Ctrl+R)">
      <AppBarToggleButton.Icon><FontIcon Glyph="&#xE943;" /></AppBarToggleButton.Icon>
     </AppBarToggleButton>
+    <AppBarButton Icon="Find" Label="Find" Command="{x:Bind ViewModel.FindCommand}" ToolTipService.ToolTip="Find in the current view (Ctrl+F)" />
     <CommandBar.SecondaryCommands>
      <AppBarButton Label="Tools..." Command="{x:Bind ViewModel.OpenToolsCommand}" ToolTipService.ToolTip="Pandoc and Tesseract: what is installed, updates, and OCR settings">
       <AppBarButton.Icon><FontIcon Glyph="&#xE90F;" /></AppBarButton.Icon>
@@ -92,14 +93,29 @@
    </Grid>
    <controls:PaneSplitter x:Name="Splitter" Grid.Column="1" />
    <Grid Grid.Column="2">
-    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-    <controls:MarkdownView x:Name="Reader" Grid.Row="1" Visibility="{x:Bind ViewModel.IsRichView, Mode=OneWay}" />
+    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+    <controls:MarkdownView x:Name="Reader" Grid.Row="2" Visibility="{x:Bind ViewModel.IsRichView, Mode=OneWay}" />
     <InfoBar x:Name="UpdateBar" Margin="24,14,24,0" VerticalAlignment="Top" MaxWidth="760" Severity="Informational" Title="Tools"
              Visibility="{x:Bind ViewModel.HasUpdateNotice, Mode=OneWay}"
              Message="{x:Bind ViewModel.UpdateNotice, Mode=OneWay}" IsOpen="{x:Bind ViewModel.HasUpdateNotice, Mode=OneWay}" CloseButtonClick="UpdateBar_Close">
      <InfoBar.ActionButton><Button Content="Open Tools" Command="{x:Bind ViewModel.OpenToolsCommand}" /></InfoBar.ActionButton>
     </InfoBar>
-    <TextBox x:Name="RawEditor" Grid.Row="1" IsReadOnly="{x:Bind ViewModel.IsSourceReadOnly, Mode=OneWay}" AcceptsReturn="True" TextWrapping="Wrap"
+    <Border Grid.Row="1" Background="{StaticResource SidebarBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1" Padding="12,6" Visibility="{x:Bind ViewModel.IsFindOpen, Mode=OneWay}">
+     <Grid ColumnSpacing="6">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+      <TextBox x:Name="FindBox" IsEnabled="{x:Bind ViewModel.IsIdle, Mode=OneWay}" Text="{x:Bind ViewModel.FindQuery, Mode=OneWay}" TextChanged="FindBox_TextChanged" PreviewKeyDown="FindBox_PreviewKeyDown"
+               PlaceholderText="{x:Bind ViewModel.FindPlaceholder, Mode=OneWay}" AutomationProperties.Name="Find in document" IsSpellCheckEnabled="False" IsTextPredictionEnabled="False" MinWidth="80" VerticalAlignment="Center" />
+      <StackPanel Grid.Column="1" VerticalAlignment="Center" MaxWidth="150">
+       <TextBlock Text="{x:Bind ViewModel.FindSummary, Mode=OneWay}" FontSize="11" Foreground="{StaticResource MutedBrush}" TextTrimming="CharacterEllipsis" AutomationProperties.LiveSetting="Polite" />
+       <CheckBox Content="Match case" IsEnabled="{x:Bind ViewModel.IsIdle, Mode=OneWay}" IsChecked="{x:Bind ViewModel.FindMatchCase, Mode=TwoWay}" FontSize="11" MinHeight="24" MinWidth="0" Padding="0" />
+      </StackPanel>
+      <Button Grid.Column="2" Command="{x:Bind ViewModel.FindPreviousCommand}" Padding="8" VerticalAlignment="Center" AutomationProperties.Name="Previous match" ToolTipService.ToolTip="Previous match (Shift+F3)"><FontIcon Glyph="&#xE70E;" FontSize="12" /></Button>
+      <Button Grid.Column="3" Command="{x:Bind ViewModel.FindNextCommand}" Padding="8" VerticalAlignment="Center" AutomationProperties.Name="Next match" ToolTipService.ToolTip="Next match (F3)"><FontIcon Glyph="&#xE70D;" FontSize="12" /></Button>
+      <Button Grid.Column="4" IsEnabled="{x:Bind ViewModel.IsIdle, Mode=OneWay}" Command="{x:Bind ViewModel.CloseFindCommand}" Padding="8" VerticalAlignment="Center" AutomationProperties.Name="Close find" ToolTipService.ToolTip="Close find (Escape)"><FontIcon Glyph="&#xE711;" FontSize="12" /></Button>
+     </Grid>
+    </Border>
+    <TextBox x:Name="RawEditor" Grid.Row="2" IsReadOnly="{x:Bind ViewModel.IsSourceReadOnly, Mode=OneWay}" AcceptsReturn="True" TextWrapping="Wrap"
+             SelectionHighlightColorWhenNotFocused="{StaticResource SearchSelectionBrush}"
              TextChanged="Source_TextChanged" PreviewKeyDown="Source_PreviewKeyDown" PlaceholderText="Write Markdown here. Switch off Source (Ctrl+R) to preview."
              FontFamily="Cascadia Mono, Consolas" FontSize="{x:Bind ViewModel.RawFontSize, Mode=OneWay}" Padding="48,30,48,80" BorderThickness="0" Background="Transparent"
              IsSpellCheckEnabled="False" IsTextPredictionEnabled="False" ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Markdown source"

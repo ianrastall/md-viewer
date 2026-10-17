@@ -38,6 +38,7 @@ For development, the loose build is at `artifacts/app/MdViewer.exe` (the .NET 10
 - **Open** (Ctrl+O), drag a file onto the window, or use **Open with**. Markdown and text files open directly, keeping their encoding (UTF-8, UTF-8 with BOM, UTF-16, or Windows-1252).
 - **Outline:** every heading, nested by level. Select one to jump to it, in the rendered page or the raw source. Drag the divider to resize the pane.
 - **Source** (Ctrl+R) edits the Markdown source of new, opened, imported, and crawled documents. The preview, outline, and statistics refresh after a short pause in typing. Existing files keep their line-ending convention when edited. **Zoom** with Ctrl+Plus, Ctrl+Minus, Ctrl+0, Ctrl+mouse wheel, or the status bar; the zoom level is remembered.
+- **Find** (Ctrl+F) searches the current view, with optional **Match case**. Preview searches rendered text, including phrases across bold or links; Source searches the literal Markdown, including comments and link destinations. F3 / Shift+F3 (or Enter / Shift+Enter in the search field) move forward / backward and wrap. Escape closes Find. Counts stop at 10,000+, but every occurrence remains navigable; preview highlights are limited to 2,000 per text control plus the selected occurrence.
 - **Links:** `#anchor` links scroll to the matching heading, links to other Markdown files open in md-viewer, and web and `mailto:` links open in your default apps. Images load from the web or relative to the document.
 - **Import:** Open also converts `.docx`, `.html`, `.htm`, `.epub`, `.odt`, and `.rtf` through Pandoc, and `.pdf` with built-in text extraction plus OCR for scanned pages (Tesseract when it is installed, otherwise Windows OCR; see Tools). Imported Markdown includes a hidden diagnostics comment with page, OCR, and warning details.
 - **Export** (Ctrl+E): Word, HTML, EPUB, RTF, ODT, LaTeX, Typst, reStructuredText, or Org through Pandoc. Relative images resolve from the document's folder.
@@ -61,6 +62,9 @@ For development, the loose build is at `artifacts/app/MdViewer.exe` (the .NET 10
 | Ctrl+Z / Ctrl+Y | Undo / redo typing, Format, and Reflow |
 | Ctrl+E | Export |
 | Ctrl+R | Toggle editable Markdown source / preview |
+| Ctrl+F | Find in the current view |
+| F3 / Shift+F3 | Next / previous match |
+| Escape | Close Find |
 | Ctrl+Plus / Ctrl+Minus / Ctrl+0 | Zoom in / out / reset |
 
 md-viewer's data folder holds `settings.json`, a fetched Pandoc, and the `app.log` and `crash.log` error logs. For the installed app it is the package's `LocalState` folder (`%LOCALAPPDATA%\Packages\IanRastall.MdViewer_5hb8chnqdhgxw\LocalState`), which Windows removes with the app; development builds use `%LOCALAPPDATA%\md-viewer`.
