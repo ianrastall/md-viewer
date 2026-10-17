@@ -290,6 +290,36 @@ try
     editor.EditSource("Replace welcome");
     Check("welcome remains read only", editor.IsSourceReadOnly && editor.MarkdownText == MainViewModel.WelcomeText && !editor.IsDirty);
     Check("editing has no unexpected errors", editorDialogs.Errors.Count == 0, string.Join(" | ", editorDialogs.Errors));
+
+    // History bounds cover both directions and keep the nearest reverse step.
+    // Small budgets exercise eviction without allocating large test documents.
+    var bounded = new DocumentHistory(maxSteps: 3, maxCharacters: 10);
+    Check("history starts empty", bounded.Count == 0 && bounded.CharacterCount == 0 && !bounded.CanUndo && !bounded.CanRedo);
+    bounded.Record("aa");
+    bounded.Record("bbb");
+    bounded.Record("cccc");
+    Check("history tracks snapshot payload", bounded.Count == 3 && bounded.CharacterCount == 9);
+    bounded.Record("dd");
+    Check("history evicts oldest step by count", bounded.Count == 3 && bounded.CharacterCount == 9);
+    Check("undo preserves nearest state under memory pressure", bounded.Undo("eeeee") == "dd" && bounded.Count == 2 && bounded.CharacterCount == 9 && bounded.CanUndo && bounded.CanRedo);
+    Check("redo accounts for removed and added snapshots", bounded.Redo("dd") == "eeeee" && bounded.Count == 2 && bounded.CharacterCount == 6 && bounded.CanUndo && !bounded.CanRedo);
+    bounded.Record("abcdefghijklmnop");
+    Check("single oversized history step stays reversible", bounded.Count == 1 && bounded.CharacterCount == 16 && bounded.CanUndo);
+    Check("oversized undo retains redo", bounded.Undo("qrstuvwxyz0123456") == "abcdefghijklmnop" && bounded.Count == 1 && bounded.CharacterCount == 17 && !bounded.CanUndo && bounded.CanRedo);
+    Check("oversized redo retains undo", bounded.Redo("abcdefghijklmnop") == "qrstuvwxyz0123456" && bounded.Count == 1 && bounded.CharacterCount == 16 && bounded.CanUndo && !bounded.CanRedo);
+    bounded.Record("x");
+    Check("history returns below budget after oversized step", bounded.Count == 1 && bounded.CharacterCount == 1);
+    bounded.Clear();
+    Check("clearing history resets accounting", bounded.Count == 0 && bounded.CharacterCount == 0 && !bounded.CanUndo && !bounded.CanRedo);
+    bounded.Record("a");
+    Check("branch setup has redo", bounded.Undo("b") == "a" && bounded.CanRedo);
+    bounded.Record("a");
+    Check("new edit clears redo and its memory", !bounded.CanRedo && bounded.Count == 1 && bounded.CharacterCount == 1 && bounded.Undo("c") == "a");
+
+    var stepsOnly = new DocumentHistory(maxSteps: 3, maxCharacters: 100);
+    for (var i = 0; i < 6; i++) stepsOnly.Record(i.ToString());
+    Check("history count limit keeps nearest undo steps", stepsOnly.Count == 3 && stepsOnly.Undo("6") == "5" && stepsOnly.Undo("5") == "4" && stepsOnly.Undo("4") == "3" && !stepsOnly.CanUndo && stepsOnly.Count == 3);
+    Check("history count limit survives undo/redo transfers", stepsOnly.Redo("3") == "4" && stepsOnly.Redo("4") == "5" && stepsOnly.Redo("5") == "6" && !stepsOnly.CanRedo && stepsOnly.Count == 3 && stepsOnly.CharacterCount == 3);
 }
 finally { scratch.Delete(recursive: true); }
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.2.1
+
+- Undo/Redo history is bounded together by 100 snapshots and a 32 MiB text budget, avoiding unbounded growth when editing large documents.
+- Distant steps are evicted first while preserving the nearest reverse operation. One oversized snapshot remains available so a large edit is still reversible.
+- Added regression checks for memory accounting, eviction, oversized snapshots, branching, and repeated Undo/Redo transfers.
+
 ## 2.2.0
 
 - New (Ctrl+N) opens a blank, editable Markdown document, with Save/Discard/Cancel protection for existing work.

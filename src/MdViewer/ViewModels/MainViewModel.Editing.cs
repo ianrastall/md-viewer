@@ -34,7 +34,7 @@ public partial class MainViewModel
         var now = System.Diagnostics.Stopwatch.GetTimestamp();
         if (!sourceEditGroup || System.Diagnostics.Stopwatch.GetElapsedTime(lastSourceEdit, now) > TimeSpan.FromSeconds(1))
             PushUndo();
-        else redoHistory.Clear();
+        else history.ClearRedo();
         sourceEditGroup = true;
         lastSourceEdit = now;
         MarkdownText = text;
@@ -79,12 +79,7 @@ public partial class MainViewModel
 
     private void EndSourceEdit() => sourceEditGroup = false;
 
-    private void PushUndo()
-    {
-        undoHistory.Add(MarkdownText);
-        if (undoHistory.Count > UndoLimit) undoHistory.RemoveAt(0);
-        redoHistory.Clear();
-    }
+    private void PushUndo() => history.Record(MarkdownText);
 
     private static string NormalizeLineEndings(string text, string newline) =>
         text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Replace("\n", newline, StringComparison.Ordinal);

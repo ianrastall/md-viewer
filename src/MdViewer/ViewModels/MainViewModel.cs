@@ -14,8 +14,7 @@ public partial class MainViewModel : ObservableObject
     public const int MinZoom = 50, MaxZoom = 250, ZoomStep = 10, MaxCrawlPages = 250;
     private readonly IViewerDialogs dialogs;
     private readonly ViewerSettings settings;
-    private const int UndoLimit = 100;
-    private readonly List<string> undoHistory = [], redoHistory = [];
+    private readonly DocumentHistory history = new();
     private CancellationTokenSource? operation;
     private TaskCompletionSource? idleCompletion;
     private string? savedText;
@@ -78,8 +77,8 @@ public partial class MainViewModel : ObservableObject
         set { settings.OutlineWidth = value; settings.Save(); }
     }
     public bool IsIdle => !IsBusy;
-    public bool CanUndo => !IsBusy && undoHistory.Count > 0;
-    public bool CanRedo => !IsBusy && redoHistory.Count > 0;
+    public bool CanUndo => !IsBusy && history.CanUndo;
+    public bool CanRedo => !IsBusy && history.CanRedo;
     /// <summary>Relative links and images resolve against the document's folder.</summary>
     public string? BaseDirectory => Path.GetDirectoryName(FilePath ?? SourcePath) is { Length: > 0 } directory ? directory : null;
 
@@ -266,25 +265,16 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanUndo))]
     private Task UndoAsync() => RunAsync("Undo", async () =>
     {
-        if (undoHistory.Count == 0) return;
-        redoHistory.Add(MarkdownText);
-        await RestoreAsync(Pop(undoHistory), "Undid the last change.");
+        if (!history.CanUndo) return;
+        await RestoreAsync(history.Undo(MarkdownText), "Undid the last change.");
     });
 
     [RelayCommand(CanExecute = nameof(CanRedo))]
     private Task RedoAsync() => RunAsync("Redo", async () =>
     {
-        if (redoHistory.Count == 0) return;
-        undoHistory.Add(MarkdownText);
-        await RestoreAsync(Pop(redoHistory), "Redid the change.");
+        if (!history.CanRedo) return;
+        await RestoreAsync(history.Redo(MarkdownText), "Redid the change.");
     });
-
-    private static string Pop(List<string> history)
-    {
-        var text = history[^1];
-        history.RemoveAt(history.Count - 1);
-        return text;
-    }
 
     private async Task RestoreAsync(string text, string status)
     {
@@ -380,8 +370,7 @@ public partial class MainViewModel : ObservableObject
         sourceLineEnding = DetectLineEnding(text);
         savedText = saved;
         EncodingLabel = encoding;
-        undoHistory.Clear();
-        redoHistory.Clear();
+        history.Clear();
         NotifyHistory();
         Origin = origin;
         FilePath = filePath;

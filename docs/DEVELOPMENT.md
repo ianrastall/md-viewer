@@ -77,3 +77,43 @@ The view-model harness passes 75 checks: the preceding 52 plus 23 checks coverin
 ### Known limits
 
 Source uses a standard WinUI TextBox, without syntax highlighting or a split preview. Full Markdown strings are retained for undo snapshots; the step limit bounds count but not bytes. Parsing is serialized and superseded results are ignored, but a parse already running in C++ cannot be interrupted. Saving to a different folder resolves relative paths from that new folder and does not copy assets. There is no autosave or recovery yet.
+
+## Milestone 3 — published installer and hosted verification
+
+### Delivery
+
+[2.2.0](https://github.com/ianrastall/md-viewer/releases/tag/v2.2.0) is published from `5797a10`, matching the binary's embedded source revision. The release contains the per-user installer, a ZIP with installation notes and license notices, and `SHA256SUMS.txt`. The ZIP's embedded setup executable was hashed and compared with the standalone installer. GitHub's uploaded asset digests match the local hashes. The application identifies itself as version 2.2.0. No signing certificate was available, and the installer is explicitly unsigned.
+
+The release script passed 90 native checks and 75 view-model checks and produced a self-contained application before compiling the installer. Desktop checks verified the reading-column fix after switching from source to preview. The development workstation's initial commit/publish jobs stalled and left stale Git locks; a temporary checkout completed the release build. Interrupted processes were stopped, stale locks were backed up and removed, and the original workspace was synchronized without replacing its Git metadata or discarding source files.
+
+### Continuous verification
+
+`.github/workflows/verify.yml` runs on pushes to main and pull requests, using the Windows 2025 x64 image and .NET 10. It verifies a pinned official Pandoc ZIP before adding the executable to PATH, then invokes the same `scripts/build.ps1 -Test` used locally. The first [hosted run](https://github.com/ianrastall/md-viewer/actions/runs/39055381026) passed 88 native checks and 75 view-model checks, with zero WinUI warnings or errors. Windows OCR was exercised; the hosted image lacks Tesseract, so its two extra checks were skipped. The workstation exercised those as part of its 90 checks.
+
+Actions are pinned to verified commit revisions, checkout credentials are not retained, and the workflow token has only read access to repository contents. Verification logs are uploaded even when a check fails. Manual dispatch can also run `scripts/release.ps1 -SkipTests -Unsigned` after the checks and retain the installer ZIP as a workflow artifact. The separate [hosted installer run](https://github.com/ianrastall/md-viewer/actions/runs/39055785632) passed the tests, self-contained publish, installer compilation, and artifact upload. This optional path does not automatically replace published releases.
+
+### Interoperation and limits
+
+CI builds the native ABI before the managed application; both the app and console harness copy the same native DLL and PDFium dependency. Pandoc is present so conversion checks cannot silently skip it. The standard CI run keeps live crawler/tool-update checks disabled to avoid depending on third-party site behavior. The release option reuses the successful checks before publishing runtimes and compiling Inno Setup.
+
+The installer build verifies required application resources, native libraries, runtime files, and licenses. It has not been installed on a separate clean Windows 10 machine during this milestone. Local tests ran on Windows 11 and hosted checks on Windows Server 2025; the declared minimum OS is therefore broader than the exercised OS matrix. Signing and SmartScreen reputation remain external release concerns.
+
+### Next work
+
+Bound undo snapshots by memory, then add in-document search and recovery for unsaved drafts. Keep UI smoke checks for changes that affect focus, text selection, dialogs, or virtualized layout; the console harness cannot establish their visual correctness.
+
+## Milestone 4 — bounded editing history
+
+### Behavior and implementation
+
+`DocumentHistory` now owns the undo and redo snapshots as a single component. Both directions share a 100-snapshot limit and a 16,777,216-UTF-16-character budget (32 MiB of text payload). This replaces two view-model lists whose count limit did not constrain the size of documents they retained.
+
+Recording a new edit invalidates redo and records the previous text. Undo/Redo transfers the current text into the opposite direction and restores the nearest snapshot. Memory accounting subtracts removed snapshots and includes newly retained text. Under pressure, the component evicts distant history before the newly created reverse step. A single snapshot larger than the budget is retained so the latest large edit can still be reversed. This is a snapshot-payload budget, not a cap on process memory: the current document, parsed model, editor control, object overhead, and garbage-collection timing are separate.
+
+The view model still owns grouping, busy state, dirty tracking, and parsing. The history component has no WinUI or native dependency, and no C ABI or file format changed. Format, Reflow, typing, Save, New, and Open use the same existing workflow semantics. Saving still retains history; loading another document clears it.
+
+### Verification and remaining work
+
+The view-model harness passes 89 checks, including 14 additional history checks using tiny configurable budgets. These exercise count and payload bounds, eviction in both directions, counter correctness, oversized snapshots, branch invalidation, clearing, and repeated transfers, without allocating huge test documents. The full WinUI build passed with zero warnings and errors. The release pipeline must also pass before publishing 2.2.1.
+
+History still stores full strings rather than deltas. Older steps can therefore disappear before the 100-step maximum for large documents. Search, unsaved-draft recovery, external-file-change detection, and more precise caret/scroll restoration remain future work.
