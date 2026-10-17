@@ -7,7 +7,7 @@ using MdViewer.Services;
 
 namespace MdViewer.ViewModels;
 
-public enum DocumentOrigin { Welcome, Markdown, Imported, Crawled }
+public enum DocumentOrigin { Welcome, Markdown, Imported, Crawled, Untitled }
 
 public partial class MainViewModel : ObservableObject
 {
@@ -50,6 +50,7 @@ public partial class MainViewModel : ObservableObject
     public string DocumentTitle => Origin switch
     {
         DocumentOrigin.Welcome => "Welcome",
+        DocumentOrigin.Untitled => "Untitled",
         DocumentOrigin.Crawled => "Crawled documentation",
         _ => Path.GetFileName(FilePath ?? SourcePath) ?? "Untitled"
     };
@@ -58,6 +59,7 @@ public partial class MainViewModel : ObservableObject
     {
         DocumentOrigin.Welcome => "",
         _ when IsDirty && FilePath is null => "● Not saved yet",
+        DocumentOrigin.Untitled => "Not saved yet",
         _ when IsDirty => "● Unsaved changes",
         _ => "Saved"
     };
@@ -81,16 +83,33 @@ public partial class MainViewModel : ObservableObject
     /// <summary>Relative links and images resolve against the document's folder.</summary>
     public string? BaseDirectory => Path.GetDirectoryName(FilePath ?? SourcePath) is { Length: > 0 } directory ? directory : null;
 
-    partial void OnMarkdownTextChanged(string value) => UpdateDirty();
-    partial void OnOriginChanged(DocumentOrigin value) => NotifyTitle();
+    partial void OnMarkdownTextChanged(string value)
+    {
+        UpdateDirty();
+        OnPropertyChanged(nameof(SourceText));
+    }
+    partial void OnOriginChanged(DocumentOrigin value)
+    {
+        NotifyTitle();
+        OnPropertyChanged(nameof(IsSourceReadOnly));
+    }
     partial void OnFilePathChanged(string? value) => NotifyTitle();
     partial void OnSourcePathChanged(string? value) => NotifyTitle();
     partial void OnIsDirtyChanged(bool value) => NotifyTitle();
     partial void OnEncodingLabelChanged(string value) => OnPropertyChanged(nameof(StatisticsText));
-    partial void OnIsRawViewChanged(bool value) => OnPropertyChanged(nameof(IsRichView));
+    partial void OnIsRawViewChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsRichView));
+        if (!value)
+        {
+            EndSourceEdit();
+            _ = FlushSourceAsync();
+        }
+    }
     partial void OnIsBusyChanged(bool value)
     {
         OnPropertyChanged(nameof(IsIdle));
+        OnPropertyChanged(nameof(IsSourceReadOnly));
         NotifyHistory();
     }
     partial void OnUpdateNoticeChanged(string value) => OnPropertyChanged(nameof(HasUpdateNotice));
@@ -243,7 +262,7 @@ public partial class MainViewModel : ObservableObject
         finally { IsCrawling = false; operation = null; }
     });
 
-    /// <summary>Steps back through changes made by Format and Reflow. Saving does not clear the history.</summary>
+    /// <summary>Steps back through typing, Format, and Reflow. Saving does not clear history.</summary>
     [RelayCommand(CanExecute = nameof(CanUndo))]
     private Task UndoAsync() => RunAsync("Undo", async () =>
     {
@@ -346,9 +365,7 @@ public partial class MainViewModel : ObservableObject
     {
         if (text == MarkdownText) { Status = unchanged; return; }
         if (Origin == DocumentOrigin.Welcome) Origin = DocumentOrigin.Imported;
-        undoHistory.Add(MarkdownText);
-        if (undoHistory.Count > UndoLimit) undoHistory.RemoveAt(0);
-        redoHistory.Clear();
+        PushUndo();
         MarkdownText = text;
         NotifyHistory();
         await RenderAsync();
@@ -357,6 +374,10 @@ public partial class MainViewModel : ObservableObject
 
     private async Task LoadAsync(string text, DocumentOrigin origin, string? filePath, string? sourcePath, string? saved, string encoding)
     {
+        CancelSourceRefresh();
+        sourceNeedsRefresh = false;
+        EndSourceEdit();
+        sourceLineEnding = DetectLineEnding(text);
         savedText = saved;
         EncodingLabel = encoding;
         undoHistory.Clear();
@@ -371,22 +392,30 @@ public partial class MainViewModel : ObservableObject
         await RenderAsync();
     }
 
-    private async Task RenderAsync()
+    private async Task RenderAsync(CancellationToken cancellation = default)
     {
         var generation = ++renderGeneration;
         var text = MarkdownText;
+        await parseGate.WaitAsync(cancellation);
         try
         {
-            var document = await Task.Run(() => MarkdownEngine.Parse(text));
-            if (generation == renderGeneration) Document = document;
+            if (generation != renderGeneration || cancellation.IsCancellationRequested) return;
+            var document = await Task.Run(() => MarkdownEngine.Parse(text), cancellation);
+            if (generation == renderGeneration && !cancellation.IsCancellationRequested)
+            {
+                Document = document;
+                sourceNeedsRefresh = false;
+            }
         }
         catch (NativeCoreException ex)
         {
             if (generation != renderGeneration) return;
             Document = null;
+            sourceNeedsRefresh = false;
             IsRawView = true;
             Status = ex.Message + " Showing the raw Markdown.";
         }
+        finally { parseGate.Release(); }
     }
 
     private async Task RunAsync(string action, Func<Task> work)
@@ -395,7 +424,12 @@ public partial class MainViewModel : ObservableObject
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         idleCompletion = completion;
         IsBusy = true;
-        try { await work(); }
+        try
+        {
+            EndSourceEdit();
+            await FlushSourceAsync();
+            await work();
+        }
         catch (OperationCanceledException) { Status = $"{action} cancelled."; }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -413,12 +447,13 @@ public partial class MainViewModel : ObservableObject
     public const string WelcomeText = """
         # Welcome to md-viewer
 
-        A fast, native Markdown reader for Windows. Open a file with **Open** (Ctrl+O), drop one onto the window, or use **Open with** from File Explorer.
+        A fast, native Markdown reader and editor for Windows. Start writing with **New** (Ctrl+N), open a file with **Open** (Ctrl+O), drop one onto the window, or use **Open with** from File Explorer.
 
         ## Reading
 
         - The **outline** on the left lists every heading. Click one to jump to it.
-        - **Raw** (Ctrl+R) switches between the rendered page and the Markdown source.
+        - **Source** (Ctrl+R) switches between editable Markdown and the rendered preview. Changes update the outline and statistics after a short pause in typing.
+        - Undo typing, Format, and Reflow with Ctrl+Z; redo with Ctrl+Y or Ctrl+Shift+Z.
         - Zoom with Ctrl+Plus, Ctrl+Minus, and Ctrl+0, or Ctrl+mouse wheel.
         - Links to other Markdown files open here; web links open in your browser.
 

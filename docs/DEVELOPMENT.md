@@ -1,6 +1,6 @@
 # Development status
 
-This report is updated at development milestones. The README describes the user-facing application; this file records how the implementation fits together, what was verified, and the next work.
+This report is updated at development milestones. The README describes the user-facing application; this file records how the implementation fits together, what was verified, and the next work. Historical remaining-work lists describe the state at that milestone; later milestones supersede them.
 
 ## Architecture
 
@@ -45,3 +45,35 @@ The native harness passes all 90 checks, including real PDF/OCR and Pandoc paths
 ### Known limits
 
 The harness validates the real view model and C ABI, but it does not automate native WinUI layout or dialogs. Network-dependent checks are opt-in. Code signing still depends on an available code-signing certificate. Text selection in the rendered view remains block-local, and the renderer deliberately leaves unsupported Markdown extensions as source.
+
+## Milestone 2 — new documents and source editing
+
+### Behavior
+
+New (Ctrl+N) opens a blank UTF-8 document in Source mode with the title Untitled. An untouched blank document is clean, so closing it does not demand a save. Typing immediately updates the unsaved indicator. Save asks for a Markdown path, then converts the untitled document into a normal saved document. New uses the same Save/Discard/Cancel workflow as Open and Close.
+
+Source (Ctrl+R), replacing the old read-only Raw view, edits new, opened, imported, and crawled Markdown. The welcome page stays read-only. Adjacent keystrokes form an undo group, with a new group after a one-second pause or a document command. Typing, Format, and Reflow share the existing 100-step history, including after saving. Keyboard shortcuts and the source context menu use that same history; the text control's separate undo stack is cleared.
+
+The WinUI TextBox stores line breaks as CR. The view model exposes a normalized control representation and translates actual edits back to the document's original LF, CRLF, or CR convention. Merely displaying source does not change the document or its dirty state. Mixed conventions normalize to the first encountered convention when the user actually edits. New documents use platform line endings.
+
+### Coordination and performance
+
+`MainViewModel.Editing.cs` owns source-edit grouping and preview scheduling. Text and dirty state update synchronously, while parsing waits for a 200 ms typing pause. Cancellation discards superseded scheduled work. A generation counter rejects obsolete parse results, and a semaphore permits only one parser at a time. Commands flush pending parsing before operating, so Format, Reflow, outline metadata, and save prompts all see current text. No C ABI changes were needed: editing feeds the same parser and writer as existing documents.
+
+The window synchronizes source programmatically under a guard, avoiding feedback loops and preserving the caret during ordinary typing. Switching back to preview retains the previous reading position. Changes to the base directory rebuild relative images after Save As. UI inspection also found that the Tools notice obscured the first line; the notice now has its own layout row and collapses fully when absent. Short documents exposed a separate layout problem: the reading column now uses an explicit width derived from the viewport and zoom, updated on resize, and the preview realizes content after becoming visible. Hidden previews do not build WinUI blocks on every source refresh.
+
+### Verification
+
+The view-model harness passes 75 checks: the preceding 52 plus 23 checks covering blank documents, typing/preview, history, New's unsaved choices, saving, newline preservation, rapid edits, stale parse rejection, and welcome-page protection. Native checks still cover the unchanged C++ core. Desktop smoke testing exercised the actual toolbar, editable TextBox, rendered headings and bold text, outline/statistics refresh, Ctrl+R, and Ctrl+Z/Ctrl+Y. The real Save As dialog opened and held the busy state; the UI automation helper could not submit its out-of-process PickerHost window, so completed disk saves are covered by the view-model/C ABI harness rather than claimed as desktop automation coverage.
+
+### Remaining work
+
+1. Finish installer/package verification and publish 2.2.0, with accurate signing and runtime requirements.
+2. Add Windows CI for build/native/view-model checks and release artifacts.
+3. Add in-document search suitable for both editable source and virtualized preview.
+4. Bound editing history by memory as well as step count for very large documents, and preserve caret/scroll positions more precisely across preview and history changes.
+5. Consider crash recovery for unsaved drafts and external-file-change detection before expanding into richer editing features.
+
+### Known limits
+
+Source uses a standard WinUI TextBox, without syntax highlighting or a split preview. Full Markdown strings are retained for undo snapshots; the step limit bounds count but not bytes. Parsing is serialized and superseded results are ignored, but a parse already running in C++ cannot be interrupted. Saving to a different folder resolves relative paths from that new folder and does not copy assets. There is no autosave or recovery yet.

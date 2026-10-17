@@ -18,7 +18,7 @@ namespace MdViewer;
 public sealed partial class MainWindow : Window, IViewerDialogs
 {
     public MainViewModel ViewModel { get; }
-    private bool allowClose, closing, sized;
+    private bool allowClose, closing, sized, syncingSource;
 
     public MainWindow()
     {
@@ -91,17 +91,75 @@ public sealed partial class MainWindow : Window, IViewerDialogs
         switch (e.PropertyName)
         {
             case nameof(MainViewModel.Document):
-                Reader.Show(ViewModel.Document, ViewModel.ZoomFactor, ViewModel.BaseDirectory, keepPosition: false);
+                if (ViewModel.IsRichView) Reader.Show(ViewModel.Document, ViewModel.ZoomFactor, ViewModel.BaseDirectory, keepPosition: false);
                 RebuildOutline();
                 break;
+            case nameof(MainViewModel.SourceText):
+                SyncSource();
+                break;
+            case nameof(MainViewModel.IsRawView):
+                if (ViewModel.IsRawView) DispatcherQueue.TryEnqueue(() => { if (ViewModel.IsRawView) RawEditor.Focus(FocusState.Programmatic); });
+                else DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (ViewModel.IsRawView) return;
+                    // A hidden repeater has no usable viewport. Realize again after
+                    // the preview is visible so short documents get the right width.
+                    Reader.Show(ViewModel.Document, ViewModel.ZoomFactor, ViewModel.BaseDirectory, keepPosition: true);
+                    Reader.FocusReader();
+                });
+                break;
+            case nameof(MainViewModel.BaseDirectory):
+                if (ViewModel.IsRichView) Reader.Show(ViewModel.Document, ViewModel.ZoomFactor, ViewModel.BaseDirectory, keepPosition: true);
+                break;
             case nameof(MainViewModel.ZoomFactor):
-                Reader.Show(ViewModel.Document, ViewModel.ZoomFactor, ViewModel.BaseDirectory, keepPosition: true);
+                if (ViewModel.IsRichView) Reader.Show(ViewModel.Document, ViewModel.ZoomFactor, ViewModel.BaseDirectory, keepPosition: true);
                 break;
             case nameof(MainViewModel.WindowTitle):
                 Title = ViewModel.WindowTitle;
                 break;
         }
     }
+
+    private void SyncSource()
+    {
+        var text = ViewModel.SourceText;
+        if (RawEditor.Text == text) return;
+        syncingSource = true;
+        try
+        {
+            var start = Math.Min(RawEditor.SelectionStart, text.Length);
+            RawEditor.Text = text;
+            RawEditor.Select(start, 0);
+            RawEditor.ClearUndoRedoHistory();
+        }
+        finally { syncingSource = false; }
+    }
+
+    private void Source_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (!syncingSource && ViewModel is not null)
+        {
+            ViewModel.EditSource(RawEditor.Text);
+            RawEditor.ClearUndoRedoHistory();
+        }
+    }
+
+    // TextBox owns Ctrl+Z by default; all editing must share document history.
+    // See Microsoft's keyboard-accelerator guidance for PreviewKeyDown routing.
+    private void Source_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (!Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down)) return;
+        var shift = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+        var command = e.Key == VirtualKey.Y || e.Key == VirtualKey.Z && shift ? ViewModel.RedoCommand : e.Key == VirtualKey.Z ? ViewModel.UndoCommand : null;
+        if (command is null) return;
+        if (command.CanExecute(null)) command.Execute(null);
+        e.Handled = true;
+    }
+
+    private void Source_Cut(object sender, RoutedEventArgs e) { if (!ViewModel.IsSourceReadOnly) RawEditor.CutSelectionToClipboard(); }
+    private void Source_Copy(object sender, RoutedEventArgs e) => RawEditor.CopySelectionToClipboard();
+    private void Source_Paste(object sender, RoutedEventArgs e) { if (!ViewModel.IsSourceReadOnly) RawEditor.PasteFromClipboard(); }
+    private void Source_SelectAll(object sender, RoutedEventArgs e) => RawEditor.SelectAll();
 
     // Nodes are built directly so every level starts expanded.
     private void RebuildOutline()

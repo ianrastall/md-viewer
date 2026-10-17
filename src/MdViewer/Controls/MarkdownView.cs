@@ -19,6 +19,7 @@ public sealed partial class MarkdownView : UserControl
     private readonly ItemsRepeater repeater;
     private readonly BlockFactory factory = new();
     private MarkdownDocument? document;
+    private double zoomFactor = 1;
 
     public event EventHandler<string>? LinkInvoked;
     /// <summary>Ctrl+wheel: +1 to zoom in, -1 to zoom out.</summary>
@@ -26,16 +27,19 @@ public sealed partial class MarkdownView : UserControl
 
     public MarkdownView()
     {
-        repeater = new ItemsRepeater { Layout = new StackLayout(), HorizontalAlignment = HorizontalAlignment.Stretch, ItemTemplate = factory };
+        repeater = new ItemsRepeater { Layout = new StackLayout(), HorizontalAlignment = HorizontalAlignment.Center, ItemTemplate = factory };
         scroller = new ScrollViewer
         {
             Content = repeater,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Top,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             ZoomMode = ZoomMode.Disabled,
             IsTabStop = true
         };
         Content = scroller;
+        scroller.SizeChanged += (_, _) => ResizeReadingColumn();
         AddHandler(PointerWheelChangedEvent, new PointerEventHandler(OnPointerWheelChanged), handledEventsToo: true);
     }
 
@@ -43,16 +47,21 @@ public sealed partial class MarkdownView : UserControl
     {
         var ratio = keepPosition && scroller.ScrollableHeight > 0 ? scroller.VerticalOffset / scroller.ScrollableHeight : 0;
         document = value;
+        zoomFactor = zoom;
         // Clearing the source recycles every host, so the same document re-renders at a new zoom.
         repeater.ItemsSource = null;
         factory.Renderer = new MarkdownRenderer(zoom, baseDirectory, url => LinkInvoked?.Invoke(this, url));
         factory.First = value?.Blocks.FirstOrDefault();
         repeater.MaxWidth = ReadingWidth * zoom;
         repeater.Margin = new Thickness(56 * zoom, 36 * zoom, 56 * zoom, 120);
+        ResizeReadingColumn();
         repeater.ItemsSource = value?.Blocks;
         scroller.UpdateLayout();
         scroller.ChangeView(null, ratio * scroller.ScrollableHeight, null, disableAnimation: true);
     }
+
+    private void ResizeReadingColumn() => repeater.Width = Math.Max(1,
+        Math.Min(ReadingWidth * zoomFactor, scroller.ActualWidth - repeater.Margin.Left - repeater.Margin.Right));
 
     public void ScrollToBlock(int index)
     {

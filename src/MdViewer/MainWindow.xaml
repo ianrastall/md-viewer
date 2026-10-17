@@ -19,6 +19,9 @@
 
   <Border Grid.Row="1" Background="{StaticResource SidebarBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
    <CommandBar x:Name="Toolbar" HorizontalAlignment="Left" Background="Transparent" DefaultLabelPosition="Right" IsDynamicOverflowEnabled="True" IsEnabled="{x:Bind ViewModel.IsIdle, Mode=OneWay}">
+    <AppBarButton Icon="Add" Label="New" Command="{x:Bind ViewModel.NewCommand}" ToolTipService.ToolTip="New Markdown document (Ctrl+N)">
+     <AppBarButton.KeyboardAccelerators><KeyboardAccelerator Modifiers="Control" Key="N" /></AppBarButton.KeyboardAccelerators>
+    </AppBarButton>
     <AppBarButton Icon="OpenFile" Label="Open" Command="{x:Bind ViewModel.OpenCommand}" ToolTipService.ToolTip="Open or import a document">
      <AppBarButton.KeyboardAccelerators><KeyboardAccelerator Modifiers="Control" Key="O" /></AppBarButton.KeyboardAccelerators>
     </AppBarButton>
@@ -33,7 +36,7 @@
      <AppBarButton.KeyboardAccelerators><KeyboardAccelerator Modifiers="Control" Key="W" /></AppBarButton.KeyboardAccelerators>
     </AppBarButton>
     <AppBarSeparator />
-    <AppBarButton Icon="Undo" Label="Undo" Command="{x:Bind ViewModel.UndoCommand}" ToolTipService.ToolTip="Undo the last Format or Reflow (Ctrl+Z)">
+    <AppBarButton Icon="Undo" Label="Undo" Command="{x:Bind ViewModel.UndoCommand}" ToolTipService.ToolTip="Undo typing, Format, or Reflow (Ctrl+Z)">
      <AppBarButton.KeyboardAccelerators><KeyboardAccelerator Modifiers="Control" Key="Z" /></AppBarButton.KeyboardAccelerators>
     </AppBarButton>
     <AppBarButton Icon="Redo" Label="Redo" Command="{x:Bind ViewModel.RedoCommand}" ToolTipService.ToolTip="Redo (Ctrl+Y)">
@@ -53,7 +56,7 @@
     </AppBarButton>
     <AppBarButton Icon="Sort" Label="Reflow" Command="{x:Bind ViewModel.ReflowCommand}" ToolTipService.ToolTip="Repair skipped heading levels" />
     <AppBarSeparator />
-    <AppBarToggleButton Label="Raw" IsChecked="{x:Bind ViewModel.IsRawView, Mode=TwoWay}" ToolTipService.ToolTip="Show the Markdown source (Ctrl+R)">
+    <AppBarToggleButton Label="Source" IsChecked="{x:Bind ViewModel.IsRawView, Mode=TwoWay}" ToolTipService.ToolTip="Edit Markdown source or show the preview (Ctrl+R)">
      <AppBarToggleButton.Icon><FontIcon Glyph="&#xE943;" /></AppBarToggleButton.Icon>
     </AppBarToggleButton>
     <CommandBar.SecondaryCommands>
@@ -89,15 +92,30 @@
    </Grid>
    <controls:PaneSplitter x:Name="Splitter" Grid.Column="1" />
    <Grid Grid.Column="2">
-    <controls:MarkdownView x:Name="Reader" Visibility="{x:Bind ViewModel.IsRichView, Mode=OneWay}" />
-    <InfoBar x:Name="UpdateBar" Canvas.ZIndex="1" Margin="24,14,24,0" VerticalAlignment="Top" MaxWidth="760" Severity="Informational" Title="Tools"
+    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+    <controls:MarkdownView x:Name="Reader" Grid.Row="1" Visibility="{x:Bind ViewModel.IsRichView, Mode=OneWay}" />
+    <InfoBar x:Name="UpdateBar" Margin="24,14,24,0" VerticalAlignment="Top" MaxWidth="760" Severity="Informational" Title="Tools"
+             Visibility="{x:Bind ViewModel.HasUpdateNotice, Mode=OneWay}"
              Message="{x:Bind ViewModel.UpdateNotice, Mode=OneWay}" IsOpen="{x:Bind ViewModel.HasUpdateNotice, Mode=OneWay}" CloseButtonClick="UpdateBar_Close">
      <InfoBar.ActionButton><Button Content="Open Tools" Command="{x:Bind ViewModel.OpenToolsCommand}" /></InfoBar.ActionButton>
     </InfoBar>
-    <TextBox x:Name="RawEditor" Text="{x:Bind ViewModel.MarkdownText, Mode=OneWay}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
+    <TextBox x:Name="RawEditor" Grid.Row="1" IsReadOnly="{x:Bind ViewModel.IsSourceReadOnly, Mode=OneWay}" AcceptsReturn="True" TextWrapping="Wrap"
+             TextChanged="Source_TextChanged" PreviewKeyDown="Source_PreviewKeyDown" PlaceholderText="Write Markdown here. Switch off Source (Ctrl+R) to preview."
              FontFamily="Cascadia Mono, Consolas" FontSize="{x:Bind ViewModel.RawFontSize, Mode=OneWay}" Padding="48,30,48,80" BorderThickness="0" Background="Transparent"
              IsSpellCheckEnabled="False" IsTextPredictionEnabled="False" ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Markdown source"
              Visibility="{x:Bind ViewModel.IsRawView, Mode=OneWay}">
+     <TextBox.ContextFlyout>
+      <MenuFlyout>
+       <MenuFlyoutItem Text="Undo" Command="{x:Bind ViewModel.UndoCommand}" />
+       <MenuFlyoutItem Text="Redo" Command="{x:Bind ViewModel.RedoCommand}" />
+       <MenuFlyoutSeparator />
+       <MenuFlyoutItem Text="Cut" Click="Source_Cut" IsEnabled="{x:Bind ViewModel.IsIdle, Mode=OneWay}" />
+       <MenuFlyoutItem Text="Copy" Click="Source_Copy" />
+       <MenuFlyoutItem Text="Paste" Click="Source_Paste" IsEnabled="{x:Bind ViewModel.IsIdle, Mode=OneWay}" />
+       <MenuFlyoutSeparator />
+       <MenuFlyoutItem Text="Select all" Click="Source_SelectAll" />
+      </MenuFlyout>
+     </TextBox.ContextFlyout>
      <TextBox.Resources>
       <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
       <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />

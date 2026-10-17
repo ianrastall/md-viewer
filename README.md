@@ -1,6 +1,6 @@
 # md-viewer
 
-A native dark-mode Markdown reader and converter for Windows. It renders Markdown with WinUI controls, builds a heading outline for navigation, imports Word, HTML, EPUB, and PDF documents, exports through Pandoc, and can collect a documentation site into one Markdown file. A green accent palette runs through the interface; theme colors are centralized in `src/MdViewer/App.xaml`.
+A native dark-mode Markdown reader, editor, and converter for Windows. It renders Markdown with WinUI controls, builds a heading outline for navigation, imports Word, HTML, EPUB, and PDF documents, exports through Pandoc, and can collect a documentation site into one Markdown file. A green accent palette runs through the interface; theme colors are centralized in `src/MdViewer/App.xaml`.
 
 Built with **WinUI 3, C# 14, .NET 10, CommunityToolkit.Mvvm, and C++20**. The program itself is C++ behind a versioned C ABI (`native/include/mdv_native.h`): Markdown parsing and reflow, reading and saving documents, Pandoc import/export/format, PDF import with Tesseract or Windows OCR, the documentation crawler, and finding, checking, and installing Pandoc and Tesseract. C# draws the window and handles the outside world: rendering, the view model, dialogs, settings, and packaging. No browser or WebView is used.
 
@@ -34,16 +34,17 @@ For development, the loose build is at `artifacts/app/MdViewer.exe` (the .NET 10
 
 ## Use
 
+- **New** (Ctrl+N) starts a blank, editable Markdown document. Type in **Source**, switch it off (Ctrl+R) to preview, and **Save** to choose a file. New, Open, and Close ask about unsaved work first.
 - **Open** (Ctrl+O), drag a file onto the window, or use **Open with**. Markdown and text files open directly, keeping their encoding (UTF-8, UTF-8 with BOM, UTF-16, or Windows-1252).
 - **Outline:** every heading, nested by level. Select one to jump to it, in the rendered page or the raw source. Drag the divider to resize the pane.
-- **Raw** (Ctrl+R) shows the Markdown source. **Zoom** with Ctrl+Plus, Ctrl+Minus, Ctrl+0, Ctrl+mouse wheel, or the status bar; the zoom level is remembered.
+- **Source** (Ctrl+R) edits the Markdown source of new, opened, imported, and crawled documents. The preview, outline, and statistics refresh after a short pause in typing. Existing files keep their line-ending convention when edited. **Zoom** with Ctrl+Plus, Ctrl+Minus, Ctrl+0, Ctrl+mouse wheel, or the status bar; the zoom level is remembered.
 - **Links:** `#anchor` links scroll to the matching heading, links to other Markdown files open in md-viewer, and web and `mailto:` links open in your default apps. Images load from the web or relative to the document.
 - **Import:** Open also converts `.docx`, `.html`, `.htm`, `.epub`, `.odt`, and `.rtf` through Pandoc, and `.pdf` with built-in text extraction plus OCR for scanned pages (Tesseract when it is installed, otherwise Windows OCR; see Tools). Imported Markdown includes a hidden diagnostics comment with page, OCR, and warning details.
 - **Export** (Ctrl+E): Word, HTML, EPUB, RTF, ODT, LaTeX, Typst, reStructuredText, or Org through Pandoc. Relative images resolve from the document's folder.
 - **Crawl:** collects a documentation site into one Markdown document. It stays within the start page's folder, fetches one page at a time at least two seconds apart, honors `robots.txt` and `Crawl-delay`, stops at 250 pages, and fetches Wikipedia and other MediaWiki articles as a single article.
 - **Format:** normalizes the Markdown through Pandoc: ATX headings, pipe tables, no hard wrapping, and no Pandoc-only attribute, div, or span syntax. A leading YAML metadata block is kept verbatim. Files with old Mac (CR-only) or doubled (CR CR LF) line endings keep their paragraphs. Text md-viewer produces (Format, imports, and crawls) uses the platform's line endings, CRLF on Windows; Reflow edits headings in place and leaves line endings alone.
 - **Reflow:** repairs skipped heading levels (`#`, `###`, `#####` becomes `#`, `##`, `###`), editing only the heading markers. The status bar reports changes and anything worth reviewing, such as hand-written tables of contents or anchor links.
-- **Undo** (Ctrl+Z) and **Redo** (Ctrl+Y or Ctrl+Shift+Z) step through Format and Reflow changes, up to 100 steps; opening or closing a document clears the history.
+- **Undo** (Ctrl+Z) and **Redo** (Ctrl+Y or Ctrl+Shift+Z) step through typing, Format, and Reflow changes, up to 100 steps. Adjacent keystrokes are grouped; saving preserves history, and New, Open, or Close clears it. The source context menu uses this same history.
 - **Save** (Ctrl+S) and **Save as** (Ctrl+Shift+S) write Markdown. Saves go through a temporary file, so a failed save never truncates the original. Closing, opening, or crawling over unsaved work (including a fresh import) asks first.
 
 - **Tools** (in the ⋯ menu) shows each external program md-viewer uses: whether it is installed, where, its version and languages, and whether a newer official release is out. md-viewer also checks once a day (this can be turned off there) and shows a notice when an update is available.
@@ -53,12 +54,13 @@ For development, the loose build is at `artifacts/app/MdViewer.exe` (the .NET 10
   - Downloads are checked against the SHA-256 digests GitHub publishes for each release.
 | Shortcut | Action |
 | --- | --- |
+| Ctrl+N | New editable Markdown document |
 | Ctrl+O | Open or import |
 | Ctrl+S / Ctrl+Shift+S | Save / Save as |
 | Ctrl+W | Close the document |
-| Ctrl+Z / Ctrl+Y | Undo / redo Format and Reflow |
+| Ctrl+Z / Ctrl+Y | Undo / redo typing, Format, and Reflow |
 | Ctrl+E | Export |
-| Ctrl+R | Toggle raw Markdown |
+| Ctrl+R | Toggle editable Markdown source / preview |
 | Ctrl+Plus / Ctrl+Minus / Ctrl+0 | Zoom in / out / reset |
 
 md-viewer's data folder holds `settings.json`, a fetched Pandoc, and the `app.log` and `crash.log` error logs. For the installed app it is the package's `LocalState` folder (`%LOCALAPPDATA%\Packages\IanRastall.MdViewer_5hb8chnqdhgxw\LocalState`), which Windows removes with the app; development builds use `%LOCALAPPDATA%\md-viewer`.

@@ -223,6 +223,73 @@ try
     using (var locked = new FileStream(gatedCopy, FileMode.Open, FileAccess.Read, FileShare.None))
         Check("failed save keeps window open", !await gated.CanLeaveAsync() && gated.IsDirty && !gated.IsBusy && gatedDialogs.Errors.Count == 3);
     Check("failed save leaves original intact", File.ReadAllText(gatedCopy) == textBefore && !Directory.EnumerateFiles(scratch.FullName, ".*.tmp").Any());
+
+    // New documents start with a clean, editable source and acquire a save path later.
+    var editorDialogs = new FakeDialogs();
+    var editor = new MainViewModel(editorDialogs, ViewerSettings.Load(Path.Combine(scratch.FullName, "editor-settings.json")));
+    await editor.NewCommand.ExecuteAsync(null);
+    Check("new blank document", editor is { Origin: DocumentOrigin.Untitled, DocumentTitle: "Untitled", MarkdownText: "", FilePath: null, SourcePath: null, IsDirty: false, IsRawView: true, IsSourceReadOnly: false, EncodingLabel: "UTF-8" } && editor.Headings.Count == 0 && !editor.CanUndo && editor.DocumentState == "Not saved yet");
+    editor.EditSource("# Draft\r\r### Child\r");
+    editor.EditSource("# Draft\r\r### Child\r\rWords here.\r");
+    Check("typing updates dirty state immediately", editor.IsDirty && editor.CanUndo && editor.WindowTitle == "● Untitled — md-viewer");
+    await editor.FlushSourceAsync();
+    Check("typing refreshes outline and statistics", editor.Headings.Count == 1 && editor.Headings[0].Title == "Draft" && editor.Headings[0].Children[0].Title == "Child" && editor.Document?.WordCount == 4, editor.StatisticsText);
+    var typed = editor.MarkdownText;
+    Check("new text uses platform line endings", typed == "# Draft" + Environment.NewLine + Environment.NewLine + "### Child" + Environment.NewLine + Environment.NewLine + "Words here." + Environment.NewLine);
+    await editor.UndoCommand.ExecuteAsync(null);
+    Check("typing coalesces into one undo group", editor.MarkdownText == "" && !editor.IsDirty && editor.CanRedo && !editor.CanUndo);
+    await editor.RedoCommand.ExecuteAsync(null);
+    Check("redo restores typed source and outline", editor.MarkdownText == typed && editor.IsDirty && editor.Headings[0].Title == "Draft");
+
+    await editor.NewCommand.ExecuteAsync(null);
+    Check("new respects cancel unsaved", editor.MarkdownText == typed && editor.IsDirty && editorDialogs.UnsavedPrompts == 1);
+    editorDialogs.Unsaved = UnsavedChoice.Save;
+    await editor.NewCommand.ExecuteAsync(null);
+    Check("new respects cancelled save picker", editor.MarkdownText == typed && editor.IsDirty && editorDialogs.SavePrompts == 1);
+    var draft = Path.Combine(scratch.FullName, "draft.md");
+    editorDialogs.SavePath = draft;
+    await editor.NewCommand.ExecuteAsync(null);
+    Check("new saves previous document when requested", File.ReadAllText(draft) == typed && editor is { Origin: DocumentOrigin.Untitled, IsDirty: false, MarkdownText: "", IsRawView: true } && !editor.CanUndo && !editor.CanRedo);
+    var prompts = editorDialogs.UnsavedPrompts;
+    await editor.NewCommand.ExecuteAsync(null);
+    Check("empty new document needs no discard prompt", editorDialogs.UnsavedPrompts == prompts);
+
+    editor.EditSource("# Saved draft\r");
+    await editor.SaveCommand.ExecuteAsync(null);
+    Check("save new document chooses Markdown path", editor is { Origin: DocumentOrigin.Markdown, IsDirty: false } && editor.FilePath == draft && File.ReadAllText(draft) == editor.MarkdownText);
+    await editor.UndoCommand.ExecuteAsync(null);
+    Check("undo typing after save marks dirty", editor.MarkdownText == "" && editor.IsDirty);
+    await editor.RedoCommand.ExecuteAsync(null);
+    Check("redo typing to saved text becomes clean", !editor.IsDirty);
+
+    // Viewing source is not an edit. Actual editing preserves the file's newline convention.
+    foreach (var newline in new[] { "\n", "\r\n", "\r" })
+    {
+        var lineFile = Path.Combine(scratch.FullName, "line-endings.md");
+        var original = "# Lines" + newline + newline + "Text" + newline;
+        await File.WriteAllTextAsync(lineFile, original);
+        await editor.OpenFileAsync(lineFile);
+        editor.IsRawView = true;
+        editor.EditSource(editor.SourceText);
+        Check("source display preserves clean state " + newline.Length + " " + (int)newline[0], !editor.IsDirty && editor.MarkdownText == original && !editor.CanUndo);
+        editor.EditSource(editor.SourceText + "More\r");
+        await editor.SaveCommand.ExecuteAsync(null);
+        Check("source editing preserves line endings " + newline.Length + " " + (int)newline[0], File.ReadAllText(lineFile) == original + "More" + newline);
+    }
+
+    // Debounced old edits cannot replace a newly opened document's model.
+    for (var i = 0; i < 25; i++) editor.EditSource("# Revision " + i);
+    await editor.FlushSourceAsync();
+    Check("preview shows latest rapid edit", editor.Headings.Count == 1 && editor.Headings[0].Title == "Revision 24");
+    editorDialogs.Unsaved = UnsavedChoice.Discard;
+    editor.EditSource("# Obsolete preview");
+    await editor.OpenFileAsync(other);
+    await Task.Delay(300);
+    Check("old preview cannot overwrite opened document", editor.FilePath == other && editor.MarkdownText == "Plain paragraph." && editor.Document?.Headings.Count == 0);
+    await editor.ShowWelcomeAsync();
+    editor.EditSource("Replace welcome");
+    Check("welcome remains read only", editor.IsSourceReadOnly && editor.MarkdownText == MainViewModel.WelcomeText && !editor.IsDirty);
+    Check("editing has no unexpected errors", editorDialogs.Errors.Count == 0, string.Join(" | ", editorDialogs.Errors));
 }
 finally { scratch.Delete(recursive: true); }
 
